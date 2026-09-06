@@ -1,0 +1,24 @@
+{
+  "name": "red-crescent-minya-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create red-crescent-minya",
+    "db:migrate": "wrangler d1 execute red-crescent-minya --file=./migrations/0001_init.sql",
+    "db:migrate:prod": "wrangler d1 execute red-crescent-minya --file=./migrations/0001_init.sql --remote",
+    "r2:create": "wrangler r2 bucket create red-crescent-minya-audio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240900.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.78.0"
+  }
+}
