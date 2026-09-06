@@ -6,6 +6,7 @@ import { success, error } from './utils/response';
 import { publicRoutes } from './routes/public';
 import { adminRoutes } from './routes/admin';
 import { publicRegistrationRoutes } from './routes/registration';
+import { quickRoutes } from './routes/quick';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -36,6 +37,9 @@ app.route('/api/public', publicRoutes);
 
 // Public registration routes (no auth required)
 app.route('/api', publicRegistrationRoutes);
+
+// Quick profile and temporary registration routes
+app.route('/api', quickRoutes);
 
 // Admin routes (with authentication)
 app.route('/api/admin', adminRoutes);

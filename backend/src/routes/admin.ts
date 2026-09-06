@@ -1,55 +1,44 @@
 import { Hono } from 'hono';
 import { Env, AppEnv } from '../env';
-import { success, error, Errors } from '../utils/response';
-import { loginSchema, createMissionSchema, updateMissionSchema } from '../validation/admin.schema';
+import { success, Errors } from '../utils/response';
+import { adminAuth, getAdminId, createSession } from '../middleware/auth';
 import { authenticateAdmin } from '../services/admin.service';
-import { createSession, destroySession, adminAuth, getAdminId } from '../middleware/auth';
-import { logAudit } from '../services/audit.service';
-import { 
-  listMissions, 
-  getMissionById, 
-  createMission, 
-  updateMission, 
-  deleteMission, 
-  getMissionAvailability 
+import {
+  createMission,
+  getMissionById,
+  listMissions,
+  updateMission,
+  deleteMission,
+  getMissionAvailability,
 } from '../services/mission.service';
+import { logAudit } from '../services/audit.service';
+import { createMissionSchema, updateMissionSchema } from '../validation/admin.schema';
 
 const adminRoutes = new Hono<AppEnv>();
 
 // POST /api/admin/login
 adminRoutes.post('/login', async (c) => {
   try {
-    const body = await c.req.json();
-    const parsed = loginSchema.safeParse(body);
-    if (!parsed.success) {
-      return Errors.validation(c, parsed.error.issues);
+    const { username, password } = await c.req.json();
+    if (!username || !password) {
+      return Errors.validation(c, [
+        { path: 'username', message: 'اسم المستخدم مطلوب' },
+        { path: 'password', message: 'كلمة المرور مطلوبة' },
+      ]);
     }
 
-    const { username, password } = parsed.data;
-    const admin = await authenticateAdmin(c.env.DB, username, password);
-    if (!admin) {
-      return Errors.unauthorized(c);
+    const result = await authenticateAdmin(c.env.DB, username, password);
+    if (!result) {
+      return c.json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'بيانات الدخول غير صحيحة' }
+      }, 401);
     }
 
-    const sessionToken = await createSession(admin.id, admin.username, c.env);
-    c.res.headers.set(
-      'Set-Cookie', 
-      `rc_session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=86400`
-    );
+    // Create session in D1 and get token
+    const token = await createSession(result.admin_id, result.username, c.env);
 
-    await logAudit(c.env.DB, {
-      actorId: admin.id,
-      actorType: 'admin',
-      action: 'ADMIN_LOGIN',
-      entityType: 'admin',
-      entityId: admin.id,
-    });
-
-    return success(c, {
-      admin_id: admin.id,
-      username: admin.username,
-      display_name: admin.display_name,
-    });
+    return success(c, { ...result, token, message: 'تم تسجيل الدخول بنجاح' });
   } catch (err: any) {
     console.error('Login error:', err);
     return Errors.internal(c);
@@ -58,16 +47,27 @@ adminRoutes.post('/login', async (c) => {
 
 // POST /api/admin/logout
 adminRoutes.post('/logout', adminAuth, async (c) => {
-  const cookie = c.req.header('cookie');
-  const match = cookie?.match(/rc_session=([^;]+)/);
-  if (match) {
-    await destroySession(match[1].trim(), c.env);
+  try {
+    const adminId = getAdminId(c);
+    const token = c.req.header('Authorization')?.replace('Bearer ', '');
+    if (token) {
+      await c.env.DB.prepare('DELETE FROM admin_sessions WHERE token = ?').bind(token).run();
+    }
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'ADMIN_LOGOUT',
+      entityType: 'admin',
+      entityId: adminId,
+    });
+    return success(c, { message: 'تم تسجيل الخروج بنجاح' });
+  } catch (err: any) {
+    console.error('Logout error:', err);
+    return Errors.internal(c);
   }
-  c.res.headers.set('Set-Cookie', 'rc_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
-  return success(c, { message: 'Logged out successfully.' });
 });
 
-// POST /api/admin/missions - Create mission
+// POST /api/admin/missions - Create new mission
 adminRoutes.post('/missions', adminAuth, async (c) => {
   try {
     const body = await c.req.json();
@@ -77,7 +77,7 @@ adminRoutes.post('/missions', adminAuth, async (c) => {
     }
 
     const adminId = getAdminId(c);
-    const mission = await createMission(c.env.DB, parsed.data, adminId);
+    const mission = await createMission(c.env.DB, parsed.data as Record<string, unknown>);
 
     await logAudit(c.env.DB, {
       actorId: adminId,
@@ -85,36 +85,26 @@ adminRoutes.post('/missions', adminAuth, async (c) => {
       action: 'MISSION_CREATED',
       entityType: 'mission',
       entityId: mission.id,
-      metadata: { title: mission.title, capacity: mission.capacity, public_code: mission.public_code },
+      metadata: { title: mission.title, capacity: mission.capacity },
     });
 
-    const frontendUrl = c.env.FRONTEND_URL || 'http://localhost:5173';
-    const publicUrl = `${frontendUrl}/m/${mission.public_code}`;
-    const whatsappMessage = `صباح الخير متطوعينا الكرام\n\nعندنا ${mission.title}\n\nالتسجيل يتم من خلال الرابط التالي:\n${publicUrl}\n\nبرجاء التسجيل بنفسك وعدم التسجيل بالنيابة عن أي متطوع آخر.`;
-
-    return success(c, {
-      id: mission.id,
-      public_code: mission.public_code,
-      title: mission.title,
-      confirmation_phrase: mission.confirmation_phrase,
-      public_url: publicUrl,
-      whatsapp_message: whatsappMessage,
-    }, 201);
+    return success(c, mission);
   } catch (err: any) {
-    console.error('CREATE MISSION ERROR:', err);
+    console.error('Create mission error:', err);
     return Errors.internal(c);
   }
 });
 
-// GET /api/admin/missions - List missions
+// GET /api/admin/missions - List all missions
 adminRoutes.get('/missions', adminAuth, async (c) => {
   try {
-    const status = c.req.query('status') || undefined;
     const page = parseInt(c.req.query('page') || '1', 10);
     const limit = parseInt(c.req.query('limit') || '20', 10);
-    const offset = (page - 1) * limit;
+    const status = c.req.query('status') || undefined;
 
-    const result = await listMissions(c.env.DB, { status, limit, offset });
+    const offset = (page - 1) * limit;
+    const result = await listMissions(c.env.DB, { limit, offset, status });
+
     return success(c, {
       missions: result.missions,
       total: result.total,
@@ -143,7 +133,7 @@ adminRoutes.get('/missions/:id', adminAuth, async (c) => {
   }
 });
 
-// PATCH /api/admin/missions/:id - Update mission
+// PATCH /api/admin/missions/:id - Update mission (including capacity, status, registration window)
 adminRoutes.patch('/missions/:id', adminAuth, async (c) => {
   try {
     const id = c.req.param('id') as string;
@@ -175,6 +165,92 @@ adminRoutes.patch('/missions/:id', adminAuth, async (c) => {
   }
 });
 
+// POST /api/admin/missions/:id/toggle-registration - Toggle registration open/close
+adminRoutes.post('/missions/:id/toggle-registration', adminAuth, async (c) => {
+  try {
+    const id = c.req.param('id') as string;
+    const body = await c.req.json();
+    const { open } = body;
+
+    if (typeof open !== 'boolean') {
+      return Errors.validation(c, [{ path: 'open', message: 'يجب تحديد open كـ true أو false' }]);
+    }
+
+    const mission = await getMissionById(c.env.DB, id);
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
+    }
+
+    // Update registration window based on open flag
+    const nowIso = new Date().toISOString();
+    const updates: Record<string, unknown> = {};
+
+    if (open) {
+      // Open registration: set open_at to now, close_at to end_at
+      updates.registration_open_at = nowIso;
+      updates.registration_close_at = mission.end_at;
+      updates.status = 'OPEN';
+    } else {
+      // Close registration: set close_at to now
+      updates.registration_close_at = nowIso;
+    }
+
+    const updated = await updateMission(c.env.DB, id, updates);
+
+    const adminId = getAdminId(c);
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: open ? 'REGISTRATION_OPENED' : 'REGISTRATION_CLOSED',
+      entityType: 'mission',
+      entityId: id,
+    });
+
+    return success(c, {
+      mission: updated,
+      message: open ? 'تم فتح باب التسجيل للمهمة' : 'تم إغلاق باب التسجيل للمهمة',
+    });
+  } catch (err: any) {
+    console.error('Toggle registration error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// POST /api/admin/missions/:id/close - Close mission permanently
+adminRoutes.post('/missions/:id/close', adminAuth, async (c) => {
+  try {
+    const id = c.req.param('id') as string;
+    
+    const mission = await getMissionById(c.env.DB, id);
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
+    }
+
+    const nowIso = new Date().toISOString();
+    const updated = await updateMission(c.env.DB, id, {
+      status: 'CLOSED',
+      registration_close_at: nowIso,
+    });
+
+    const adminId = getAdminId(c);
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'MISSION_CLOSED',
+      entityType: 'mission',
+      entityId: id,
+    });
+
+    return success(c, {
+      mission: updated,
+      message: 'تم إغلاق المهمة نهائياً',
+    });
+  } catch (err: any) {
+    console.error('Close mission error:', err);
+    return Errors.internal(c);
+  }
+});
+
 // DELETE /api/admin/missions/:id - Delete mission
 adminRoutes.delete('/missions/:id', adminAuth, async (c) => {
   try {
@@ -199,54 +275,53 @@ adminRoutes.delete('/missions/:id', adminAuth, async (c) => {
   }
 });
 
-// GET /api/admin/missions/:id/registrations - List registrations for mission
+// GET /api/admin/missions/:id/registrations - List all registrations for a mission
 adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
   try {
     const missionId = c.req.param('id') as string;
-    const status = c.req.query('status') || undefined;
-    const search = c.req.query('search') || undefined;
 
-    let query = `
-      SELECT r.id, r.mission_id, r.volunteer_id, r.status, r.seat_number, 
-             r.waitlist_position, r.registration_sequence, r.created_at, r.confirmed_at,
-             v.name as volunteer_name, v.member_id,
-             a.id as audio_id, a.phrase, a.duration_ms
-      FROM registrations r
-      JOIN volunteers v ON v.id = r.volunteer_id
-      LEFT JOIN audio_confirmations a ON a.registration_id = r.id
-      WHERE r.mission_id = ?
-    `;
-    const params: (string | number)[] = [missionId];
-
-    if (status) {
-      query += ' AND r.status = ?';
-      params.push(status);
+    const mission = await getMissionById(c.env.DB, missionId);
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
     }
 
-    if (search) {
-      query += ' AND (v.name LIKE ? OR v.member_id LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
-    }
+    const registrations = await c.env.DB.prepare(
+      `SELECT r.id, r.status, r.seat_number, r.waitlist_position, r.registration_sequence,
+              r.created_at, r.confirmed_at, r.cancelled_at,
+              v.member_id, v.name, v.phone
+       FROM registrations r
+       JOIN volunteers v ON v.id = r.volunteer_id
+       WHERE r.mission_id = ?
+       ORDER BY r.registration_sequence ASC`
+    )
+      .bind(missionId)
+      .all();
 
-    query += ' ORDER BY r.registration_sequence ASC';
+    // Also get temporary registrations
+    const tempRegs = await c.env.DB.prepare(
+      `SELECT id, status, seat_number, waitlist_position, registration_sequence,
+              created_at, confirmed_at, cancelled_at, name, phone, 'TEMP' as member_id
+       FROM temporary_registrations
+       WHERE mission_id = ?
+       ORDER BY registration_sequence ASC`
+    )
+      .bind(missionId)
+      .all();
 
-    const result = await c.env.DB.prepare(query).bind(...params).all();
-
-    const counts = await c.env.DB.prepare(`
-      SELECT
-        COUNT(CASE WHEN status = 'CONFIRMED' THEN 1 END) as confirmed,
-        COUNT(CASE WHEN status = 'WAITLIST' THEN 1 END) as waitlist,
-        COUNT(CASE WHEN status = 'CANCELLED' THEN 1 END) as cancelled
-      FROM registrations
-      WHERE mission_id = ?
-    `).bind(missionId).first();
+    const allRegs = [
+      ...(registrations.results || []),
+      ...(tempRegs.results || []),
+    ].sort((a: any, b: any) => a.registration_sequence - b.registration_sequence);
 
     return success(c, {
-      registrations: result.results || [],
-      total: (result.results || []).length,
-      confirmed: (counts as any)?.confirmed || 0,
-      waitlist: (counts as any)?.waitlist || 0,
-      cancelled: (counts as any)?.cancelled || 0,
+      mission: {
+        id: mission.id,
+        title: mission.title,
+        public_code: mission.public_code,
+        capacity: mission.capacity,
+      },
+      registrations: allRegs,
+      total: allRegs.length,
     });
   } catch (err: any) {
     console.error('Get registrations error:', err);
@@ -254,222 +329,155 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
   }
 });
 
-// POST /api/admin/registrations/:id/cancel - Cancel registration & auto-promote first waitlisted
-adminRoutes.post('/registrations/:id/cancel', adminAuth, async (c) => {
+// POST /api/admin/missions/:id/cancel/:regId - Cancel a specific registration
+adminRoutes.post('/missions/:id/cancel/:regId', adminAuth, async (c) => {
   try {
-    const regId = c.req.param('id') as string;
-    const adminId = getAdminId(c);
+    const missionId = c.req.param('id') as string;
+    const regId = c.req.param('regId') as string;
 
-    // Fetch existing registration
-    const existing = await c.env.DB.prepare(`
-      SELECT r.*, v.name as volunteer_name, v.member_id, m.public_code
-      FROM registrations r
-      JOIN volunteers v ON v.id = r.volunteer_id
-      JOIN missions m ON m.id = r.mission_id
-      WHERE r.id = ?
-    `).bind(regId).first();
+    const mission = await getMissionById(c.env.DB, missionId);
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
+    }
 
-    if (!existing) {
+    // Check if registration exists
+    const reg = await c.env.DB.prepare(
+      `SELECT id, status, seat_number FROM registrations WHERE id = ? AND mission_id = ?`
+    )
+      .bind(regId, missionId)
+      .first();
+
+    if (!reg) {
       return Errors.notFound(c, 'Registration');
     }
 
-    const reg = existing as any;
-    if (reg.status === 'CANCELLED') {
-      return Errors.conflict(c, 'هذا التسجيل ملغي بالفعل.');
+    const regData = reg as any;
+    if (regData.status === 'CANCELLED') {
+      return Errors.conflict(c, 'التسجيل ملغي بالفعل');
     }
 
-    const prevStatus = reg.status;
-    const releasedSeatNumber = reg.seat_number;
-    const missionId = reg.mission_id;
+    // Cancel the registration
+    await c.env.DB.prepare(
+      `UPDATE registrations 
+       SET status = 'CANCELLED', cancelled_at = datetime('now')
+       WHERE id = ?`
+    )
+      .bind(regId)
+      .run();
 
-    // 1. Mark target registration as CANCELLED
-    await c.env.DB.prepare(`
-      UPDATE registrations 
-      SET status = 'CANCELLED', seat_number = NULL, waitlist_position = NULL, cancelled_at = datetime('now')
-      WHERE id = ?
-    `).bind(regId).run();
+    // If it was a confirmed seat, promote first waitlist volunteer
+    if (regData.status === 'CONFIRMED' && regData.seat_number) {
+      const firstWaitlist = await c.env.DB.prepare(
+        `SELECT id, waitlist_position FROM registrations 
+         WHERE mission_id = ? AND status = 'WAITLIST'
+         ORDER BY waitlist_position ASC
+         LIMIT 1`
+      )
+        .bind(missionId)
+        .first();
 
+      if (firstWaitlist) {
+        const wlData = firstWaitlist as any;
+        await c.env.DB.prepare(
+          `UPDATE registrations 
+           SET status = 'CONFIRMED', seat_number = ?, waitlist_position = NULL, confirmed_at = datetime('now')
+           WHERE id = ?`
+        )
+          .bind(regData.seat_number, wlData.id)
+          .run();
+
+        // Reorder remaining waitlist
+        await c.env.DB.prepare(
+          `UPDATE registrations 
+           SET waitlist_position = waitlist_position - 1
+           WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?`
+        )
+          .bind(missionId, wlData.waitlist_position)
+          .run();
+      }
+    }
+
+    const adminId = getAdminId(c);
     await logAudit(c.env.DB, {
       actorId: adminId,
       actorType: 'admin',
       action: 'REGISTRATION_CANCELLED',
       entityType: 'registration',
       entityId: regId,
-      metadata: {
-        mission_id: missionId,
-        volunteer_name: reg.volunteer_name,
-        member_id: reg.member_id,
-        previous_status: prevStatus,
-        released_seat: releasedSeatNumber,
-      }
+      metadata: { missionId, seatNumber: regData.seat_number },
     });
 
-    let promotedVolunteer = null;
-
-    // 2. If a CONFIRMED seat was cancelled, automatically promote the first waitlisted volunteer!
-    if (prevStatus === 'CONFIRMED') {
-      const firstWaitlisted = await c.env.DB.prepare(`
-        SELECT r.id, r.volunteer_id, v.name, v.member_id
-        FROM registrations r
-        JOIN volunteers v ON v.id = r.volunteer_id
-        WHERE r.mission_id = ? AND r.status = 'WAITLIST'
-        ORDER BY r.waitlist_position ASC
-        LIMIT 1
-      `).bind(missionId).first();
-
-      if (firstWaitlisted) {
-        const candidate = firstWaitlisted as any;
-        const newSeat = releasedSeatNumber || 1;
-
-        // Promote to CONFIRMED
-        await c.env.DB.prepare(`
-          UPDATE registrations
-          SET status = 'CONFIRMED', seat_number = ?, waitlist_position = NULL, confirmed_at = datetime('now')
-          WHERE id = ?
-        `).bind(newSeat, candidate.id).run();
-
-        // Shift remaining waitlist positions down by 1
-        await c.env.DB.prepare(`
-          UPDATE registrations
-          SET waitlist_position = waitlist_position - 1
-          WHERE mission_id = ? AND status = 'WAITLIST'
-        `).bind(missionId).run();
-
-        promotedVolunteer = {
-          registration_id: candidate.id,
-          name: candidate.name,
-          member_id: candidate.member_id,
-          new_seat_number: newSeat,
-        };
-
-        await logAudit(c.env.DB, {
-          actorId: adminId,
-          actorType: 'system',
-          action: 'WAITLIST_AUTO_PROMOTED',
-          entityType: 'registration',
-          entityId: candidate.id,
-          metadata: {
-            mission_id: missionId,
-            volunteer_name: candidate.name,
-            member_id: candidate.member_id,
-            promoted_to_seat: newSeat,
-          }
-        });
-      }
-    } else if (prevStatus === 'WAITLIST') {
-      // If a WAITLIST volunteer was cancelled, shift succeeding waitlist numbers
-      const cancelledWaitlistPos = reg.waitlist_position;
-      if (cancelledWaitlistPos) {
-        await c.env.DB.prepare(`
-          UPDATE registrations
-          SET waitlist_position = waitlist_position - 1
-          WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?
-        `).bind(missionId, cancelledWaitlistPos).run();
-      }
-    }
-
-    return success(c, {
-      cancelled_registration_id: regId,
-      status: 'CANCELLED',
-      promoted_volunteer: promotedVolunteer,
-      message: promotedVolunteer 
-        ? `تم إلغاء التسجيل وترقية المتطوع (${promotedVolunteer.name}) من قائمة الانتظار للمقعد رقم ${promotedVolunteer.new_seat_number}`
-        : 'تم إلغاء التسجيل بنجاح.',
-    });
-
+    return success(c, { message: 'تم إلغاء التسجيل بنجاح' });
   } catch (err: any) {
     console.error('Cancel registration error:', err);
     return Errors.internal(c);
   }
 });
 
-// GET /api/admin/registrations/:id/audio - Stream audio recording
-adminRoutes.get('/registrations/:id/audio', adminAuth, async (c) => {
-  try {
-    const regId = c.req.param('id');
-
-    const record = await c.env.DB.prepare(`
-      SELECT audio_key, mime_type, phrase
-      FROM audio_confirmations
-      WHERE registration_id = ?
-    `).bind(regId).first();
-
-    if (!record) {
-      return Errors.notFound(c, 'Audio confirmation');
-    }
-
-    const audioKey = (record as any).audio_key;
-    const mimeType = (record as any).mime_type || 'audio/webm';
-
-    const object = await c.env.AUDIO_BUCKET.get(audioKey);
-    if (!object) {
-      return Errors.notFound(c, 'Audio file in storage');
-    }
-
-    const headers = new Headers();
-    headers.set('Content-Type', mimeType);
-    headers.set('Cache-Control', 'private, max-age=3600');
-    headers.set('Content-Disposition', `inline; filename="recording-${regId}.webm"`);
-
-    return new Response(object.body, { headers });
-  } catch (err: any) {
-    console.error('Fetch audio error:', err);
-    return Errors.internal(c);
-  }
-});
-
-// GET /api/admin/missions/:id/export - CSV Export
+// GET /api/admin/missions/:id/export - Export registrations to CSV
 adminRoutes.get('/missions/:id/export', adminAuth, async (c) => {
   try {
     const missionId = c.req.param('id') as string;
+
     const mission = await getMissionById(c.env.DB, missionId);
     if (!mission) {
       return Errors.notFound(c, 'Mission');
     }
 
-    const query = `
-      SELECT r.registration_sequence, v.name, v.member_id, r.status, 
-             r.seat_number, r.waitlist_position, r.created_at,
-             CASE WHEN a.id IS NOT NULL THEN 'نعم' ELSE 'لا' END as has_audio
-      FROM registrations r
-      JOIN volunteers v ON v.id = r.volunteer_id
-      LEFT JOIN audio_confirmations a ON a.registration_id = r.id
-      WHERE r.mission_id = ?
-      ORDER BY r.registration_sequence ASC
-    `;
+    const registrations = await c.env.DB.prepare(
+      `SELECT r.id, r.status, r.seat_number, r.waitlist_position, r.registration_sequence,
+              r.created_at, v.member_id, v.name, v.phone
+       FROM registrations r
+       JOIN volunteers v ON v.id = r.volunteer_id
+       WHERE r.mission_id = ?
+       ORDER BY r.registration_sequence ASC`
+    )
+      .bind(missionId)
+      .all();
 
-    const result = await c.env.DB.prepare(query).bind(missionId).all();
-    const rows = result.results || [];
+    const tempRegs = await c.env.DB.prepare(
+      `SELECT id, status, seat_number, waitlist_position, registration_sequence,
+              created_at, 'مؤقت' as member_id, name, phone
+       FROM temporary_registrations
+       WHERE mission_id = ?
+       ORDER BY registration_sequence ASC`
+    )
+      .bind(missionId)
+      .all();
 
-    // Build CSV with UTF-8 BOM for Arabic support in Excel
+    const allRegs = [
+      ...(registrations.results || []),
+      ...(tempRegs.results || []),
+    ].sort((a: any, b: any) => a.registration_sequence - b.registration_sequence);
+
+    // Build CSV with UTF-8 BOM for Excel Arabic compatibility
     const BOM = '\uFEFF';
-    const headers = ['التسلسل', 'الاسم', 'رقم العضوية', 'الحالة', 'رقم المقعد', 'موقع الانتظار', 'وقت التسجيل', 'تسجيل صوتي'];
-    
-    const csvLines = [
-      headers.join(','),
-      ...rows.map((row: any) => [
-        row.registration_sequence,
-        `"${(row.name || '').replace(/"/g, '""')}"`,
-        `"${(row.member_id || '').replace(/"/g, '""')}"`,
-        `"${row.status}"`,
-        row.seat_number ?? '',
-        row.waitlist_position ?? '',
-        `"${row.created_at}"`,
-        `"${row.has_audio}"`,
-      ].join(','))
-    ];
+    const headers = 'الترتيب,رقم العضوية,الاسم,رقم التليفون,الحالة,رقم المقعد,الموقع في الانتظار,تاريخ التسجيل\n';
+    const rows = allRegs
+      .map((r: any, idx: number) => {
+        const statusAr =
+          r.status === 'CONFIRMED'
+            ? 'مؤكد'
+            : r.status === 'WAITLIST'
+            ? 'انتظار'
+            : r.status === 'CANCELLED'
+            ? 'ملغي'
+            : 'قيد المراجعة';
+        const seatDisplay = r.seat_number || '-';
+        const waitlistDisplay = r.waitlist_position || '-';
+        const date = new Date(r.created_at).toLocaleString('ar-EG');
+        return `${idx + 1},"${r.member_id}","${r.name}","${r.phone}","${statusAr}","${seatDisplay}","${waitlistDisplay}","${date}"`;
+      })
+      .join('\n');
 
-    const csvContent = BOM + csvLines.join('\r\n');
+    const csv = BOM + headers + rows;
 
-    return new Response(csvContent, {
-      headers: {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="mission-${mission.public_code}-participants.csv"`,
-      },
+    return c.text(csv, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="mission_${mission.public_code}_registrations.csv"`,
     });
-
   } catch (err: any) {
-    console.error('Export CSV error:', err);
+    console.error('Export registrations error:', err);
     return Errors.internal(c);
   }
 });

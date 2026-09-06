@@ -17,6 +17,7 @@ publicRegistrationRoutes.post('/register', async (c) => {
   try {
     let member_id = '';
     let name = '';
+    let phone = '';
     let mission_public_code = '';
     let phrase = '';
     let request_id = '';
@@ -30,6 +31,7 @@ publicRegistrationRoutes.post('/register', async (c) => {
       const formData = await c.req.formData();
       member_id = (formData.get('member_id') as string || '').trim();
       name = (formData.get('name') as string || '').trim();
+      phone = (formData.get('phone') as string || '').trim();
       mission_public_code = (formData.get('mission_public_code') as string || '').trim();
       phrase = (formData.get('phrase') as string || '').trim();
       request_id = (formData.get('request_id') as string || '').trim();
@@ -47,6 +49,7 @@ publicRegistrationRoutes.post('/register', async (c) => {
       const body = await c.req.json();
       member_id = (body.member_id || '').trim();
       name = (body.name || '').trim();
+      phone = (body.phone || '').trim();
       mission_public_code = (body.mission_public_code || '').trim();
       phrase = (body.phrase || '').trim();
       request_id = (body.request_id || '').trim();
@@ -73,6 +76,17 @@ publicRegistrationRoutes.post('/register', async (c) => {
     }
     if (!name) {
       return Errors.validation(c, [{ path: 'name', message: 'اسم المتطوع مطلوب' }]);
+    }
+    if (!phone) {
+      return Errors.validation(c, [{ path: 'phone', message: 'رقم التليفون مطلوب للتواصل من المشرف وقت المهمة' }]);
+    }
+    // Validate Egyptian mobile number (01xxxxxxxxx = 11 digits, 010/011/012/015)
+    if (!/^01[0125][0-9]{8}$/.test(phone)) {
+      return Errors.validation(c, [{ 
+        path: 'phone', 
+        message: 'رقم التليفون غير صحيح. برجاء إدخال رقم موبايل مصري صالح (11 رقم يبدأ بـ 01)',
+        code: 'INVALID_PHONE'
+      }]);
     }
 
     if (name.length < 2 || name.length > 100) {
@@ -153,9 +167,9 @@ publicRegistrationRoutes.post('/register', async (c) => {
       }
     }
 
-    // 5. Lookup or register volunteer
+    // 5. Lookup or register volunteer (with phone)
     let volunteer = await c.env.DB.prepare(
-      `SELECT id, member_id, name FROM volunteers WHERE member_id = ?`
+      `SELECT id, member_id, name, phone FROM volunteers WHERE member_id = ?`
     ).bind(member_id).first();
 
     let volunteerId: string;
@@ -164,11 +178,19 @@ publicRegistrationRoutes.post('/register', async (c) => {
     if (!volunteer) {
       volunteerId = generateUUID();
       await c.env.DB.prepare(
-        `INSERT INTO volunteers (id, member_id, name, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`
-      ).bind(volunteerId, member_id, name).run();
+        `INSERT INTO volunteers (id, member_id, name, phone, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
+      ).bind(volunteerId, member_id, name, phone).run();
     } else {
       volunteerId = (volunteer as any).id;
       storedName = (volunteer as any).name || name;
+      // Update phone if changed
+      const oldPhone = (volunteer as any).phone;
+      if (oldPhone !== phone) {
+        await c.env.DB.prepare(
+          `UPDATE volunteers SET phone = ?, updated_at = datetime('now') WHERE id = ?`
+        ).bind(phone, volunteerId).run();
+      }
     }
 
     // 6. Check duplicate registration for same mission (member_id based)

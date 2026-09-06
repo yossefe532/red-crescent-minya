@@ -1,14 +1,17 @@
+// API base URL
+const API_BASE = '/api';
+
 export interface Mission {
   id: string;
   public_code: string;
   title: string;
-  description: string | null;
-  location: string | null;
+  description?: string;
+  location?: string;
   start_at: string;
   end_at: string;
   capacity: number;
   confirmation_phrase: string;
-  status: 'DRAFT' | 'OPEN' | 'CLOSED' | 'CANCELLED' | 'COMPLETED';
+  status: string;
   confirmed: number;
   waitlist: number;
   available: number;
@@ -21,46 +24,92 @@ export interface RegistrationResult {
   status: 'CONFIRMED' | 'WAITLIST';
   seat_number: number | null;
   waitlist_position: number | null;
-  registration_sequence: number;
-  member_id: string;
   name: string;
-  message: string;
-  mission: {
-    public_code: string;
-    title: string;
-    capacity: number;
-    confirmed: number;
-    available: number;
-  };
+  member_id: string;
+  phone?: string;
+  mission_code: string;
+  mission_title: string;
+  message?: string;
 }
 
+export interface QuickProfile {
+  found: boolean;
+  member_id?: string;
+  name?: string;
+  phone?: string;
+}
+
+// Get mission details
 export async function getMission(publicCode: string): Promise<Mission> {
-  const response = await fetch(`/api/missions/${publicCode}`);
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    throw new Error(result.error?.message || 'فشل في تحميل بيانات المهمة');
+  const res = await fetch(`${API_BASE}/missions/${publicCode}`);
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'فشل تحميل بيانات المهمة');
   }
-  return result.data;
+  return data.data;
 }
 
+// Lookup volunteer by member ID
 export async function lookupMemberId(memberId: string): Promise<{ found: boolean; name?: string }> {
-  const response = await fetch(`/api/volunteers/by-member-id/${encodeURIComponent(memberId)}`);
-  const result = await response.json();
-  if (!response.ok || !result.success) {
+  const res = await fetch(`${API_BASE}/volunteers/by-member-id/${memberId}`);
+  const data = await res.json();
+  if (!data.success) {
     return { found: false };
   }
-  return result.data;
+  return data.data;
 }
 
+// Lookup quick profile
+export async function lookupQuickProfile(memberId: string): Promise<QuickProfile> {
+  const res = await fetch(`${API_BASE}/quick-profile/lookup/${memberId}`);
+  const data = await res.json();
+  if (!data.success) {
+    return { found: false };
+  }
+  return data.data;
+}
+
+// Save quick profile for future
+export async function saveQuickProfile(profile: { member_id: string; name: string; phone: string }) {
+  const res = await fetch(`${API_BASE}/quick-profile/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'فشل حفظ البيانات');
+  }
+  return data.data;
+}
+
+// Submit registration (multipart form-data)
 export async function submitRegistration(formData: FormData): Promise<RegistrationResult> {
-  const response = await fetch('/api/register', {
+  const res = await fetch(`${API_BASE}/register`, {
     method: 'POST',
     body: formData,
   });
-  
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    throw new Error(result.error?.message || 'فشل التسجيل في المهمة');
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'فشل إتمام التسجيل');
   }
-  return result.data;
+  return data.data;
+}
+
+// Submit temporary registration (without member_id)
+export async function submitTemporaryRegistration(payload: {
+  mission_public_code: string;
+  name: string;
+  phone: string;
+}): Promise<RegistrationResult> {
+  const res = await fetch(`${API_BASE}/register-temporary`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'فشل إتمام التسجيل المؤقت');
+  }
+  return data.data;
 }

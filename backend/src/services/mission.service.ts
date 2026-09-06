@@ -34,7 +34,7 @@ export interface MissionListOptions {
   offset: number;
 }
 
-export async function createMission(db: D1Database, data: MissionCreateData, createdBy: string): Promise<Mission> {
+export async function createMission(db: D1Database, data: Record<string, unknown>): Promise<Mission> {
   console.log('Creating mission with data:', data);
   
   const id = generateUUID();
@@ -68,7 +68,7 @@ export async function createMission(db: D1Database, data: MissionCreateData, cre
       registrationCloseAt,
       now,
       now,
-      createdBy ?? null
+      'system'
     ).run();
 
     console.log('Mission inserted:', result);

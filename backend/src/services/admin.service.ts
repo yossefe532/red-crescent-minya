@@ -36,7 +36,11 @@ export async function createAdminUser(db: D1Database, data: AdminUserCreateData)
   };
 }
 
-export async function authenticateAdmin(db: D1Database, username: string, password: string): Promise<AdminUser | null> {
+export async function authenticateAdmin(
+  db: D1Database, 
+  username: string, 
+  password: string
+): Promise<{ admin_id: string; username: string; display_name: string | null } | null> {
   const user = await db.prepare('SELECT * FROM admin_users WHERE username = ? AND is_active = 1').bind(username).first();
   
   if (!user) {
@@ -49,11 +53,8 @@ export async function authenticateAdmin(db: D1Database, username: string, passwo
   }
 
   return {
-    id: (user as any).id,
+    admin_id: (user as any).id,
     username: (user as any).username,
     display_name: (user as any).display_name,
-    is_active: (user as any).is_active,
-    created_at: (user as any).created_at,
-    updated_at: (user as any).updated_at,
   };
 }
