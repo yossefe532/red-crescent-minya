@@ -14,8 +14,12 @@ import {
   AdminUser,
   MissionCreateResponse 
 } from '../api/admin';
+import { MissionControlPanel } from './MissionControlPanel';
 
 export function AdminDashboard() {
+  // Control panel state
+  const [showControlPanel, setShowControlPanel] = useState(false);
+  const [controlPanelMission, setControlPanelMission] = useState<Mission | null>(null);
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [loginUsername, setLoginUsername] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
@@ -175,28 +179,25 @@ export function AdminDashboard() {
     }
   };
 
-  // Handle Toggle Mission Status (OPEN / CLOSED)
-  const handleToggleStatus = async (mission: Mission) => {
-    try {
-      const res = await fetch(`/api/admin/missions/${mission.id}/toggle-registration`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          open: mission.status !== 'OPEN' || !mission.registration_open_at 
-        }),
-      });
-      
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || 'فشل تغيير حالة التسجيل');
+  // Open control panel
+  const openControlPanel = (mission: Mission) => {
+    setControlPanelMission(mission);
+    setShowControlPanel(true);
+  };
+
+  const closeControlPanel = () => {
+    setShowControlPanel(false);
+    setControlPanelMission(null);
+  };
+
+  const handleControlPanelUpdate = async () => {
+    await loadMissionsList();
+    if (selectedMission && controlPanelMission && selectedMission.id === controlPanelMission.id) {
+      const updated = missions.find(m => m.id === selectedMission.id);
+      if (updated) {
+        setSelectedMission(updated);
+        setControlPanelMission(updated);
       }
-      
-      await loadMissionsList();
-      if (selectedMission && selectedMission.id === mission.id) {
-        setSelectedMission(data.data.mission);
-      }
-    } catch (err: any) {
-      alert(err.message || 'فشل تغيير حالة المهمة');
     }
   };
 
@@ -380,11 +381,11 @@ export function AdminDashboard() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleToggleStatus(m);
+                          openControlPanel(m);
                         }}
-                        className="text-[11px] font-bold text-slate-500 hover:text-slate-800 underline"
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline flex items-center gap-1"
                       >
-                        {isOpen ? 'إغلاق التسجيل' : 'فتح التسجيل'}
+                        ⚙️ لوحة التحكم
                       </button>
                     </div>
                   </div>
@@ -413,6 +414,13 @@ export function AdminDashboard() {
 
               {/* Action Buttons for Mission */}
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => openControlPanel(selectedMission)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg"
+                >
+                  <span>⚙️</span>
+                  <span>لوحة التحكم</span>
+                </button>
                 <button
                   onClick={() =>
                     copyToClipboard(
@@ -749,6 +757,15 @@ export function AdminDashboard() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Mission Control Panel Modal */}
+      {showControlPanel && controlPanelMission && (
+        <MissionControlPanel
+          mission={controlPanelMission}
+          onClose={closeControlPanel}
+          onUpdate={handleControlPanelUpdate}
+        />
       )}
     </div>
   );
