@@ -177,12 +177,23 @@ export function AdminDashboard() {
 
   // Handle Toggle Mission Status (OPEN / CLOSED)
   const handleToggleStatus = async (mission: Mission) => {
-    const nextStatus = mission.status === 'OPEN' ? 'CLOSED' : 'OPEN';
     try {
-      await updateMission(mission.id, { status: nextStatus });
+      const res = await fetch(`/api/admin/missions/${mission.id}/toggle-registration`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          open: mission.status !== 'OPEN' || !mission.registration_open_at 
+        }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || 'فشل تغيير حالة التسجيل');
+      }
+      
       await loadMissionsList();
       if (selectedMission && selectedMission.id === mission.id) {
-        setSelectedMission({ ...selectedMission, status: nextStatus });
+        setSelectedMission(data.data.mission);
       }
     } catch (err: any) {
       alert(err.message || 'فشل تغيير حالة المهمة');

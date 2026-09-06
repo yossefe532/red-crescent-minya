@@ -58,7 +58,7 @@ export function MissionRegistration() {
   const [result, setResult] = useState<RegistrationResult | null>(null);
 
   // Success screen mode
-  const [successMode, setSuccessMode] = useState<'result' | 'quick-save'>('result');
+  const [successMode, setSuccessMode] = useState<'result' | 'quick-save' | 'quick-save-success'>('result');
 
   // 1. Fetch Mission Info (with polling every 6s)
   const fetchMissionData = async (isInitial = false) => {
@@ -283,13 +283,15 @@ export function MissionRegistration() {
     }
 
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await saveQuickProfile({
         member_id: memberId.trim(),
         name: name.trim(),
         phone: phone.trim(),
       });
-      setSuccessMode('quick-save');
+      // Show success message by changing mode
+      setSuccessMode('quick-save-success');
     } catch (err: any) {
       setSubmitError(err.message || 'حدث خطأ أثناء حفظ البيانات');
     } finally {
@@ -583,6 +585,39 @@ export function MissionRegistration() {
               className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium py-2 px-4 rounded-xl text-sm transition"
             >
               رجوع
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // QUICK SAVE SUCCESS SCREEN
+  if (successMode === 'quick-save-success') {
+    return (
+      <div className="min-h-screen bg-slate-100 py-8 px-4 flex items-center justify-center">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-md w-full border border-slate-200 animate-fadeIn">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl">
+              ✓
+            </div>
+            <h2 className="text-2xl font-extrabold text-slate-900 mb-2">تم حفظ بياناتك بنجاح!</h2>
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              في المرة القادمة، اكتب رقم عضويتك <span className="font-bold text-emerald-600">"{memberId}"</span> فقط وهنملى بياناتك تلقائياً
+            </p>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-xs text-blue-800 text-right">
+              <p className="font-bold mb-1">📝 البيانات المحفوظة:</p>
+              <p>• رقم العضوية: <span className="font-mono font-bold">{memberId}</span></p>
+              <p>• الاسم: <span className="font-bold">{name}</span></p>
+              <p>• التليفون: <span className="font-mono font-bold">{phone}</span></p>
+            </div>
+
+            <button
+              onClick={() => navigate('/')}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-2xl transition shadow-md"
+            >
+              تم — العودة للصفحة الرئيسية
             </button>
           </div>
         </div>

@@ -92,8 +92,9 @@ publicRegistrationRoutes.post('/register', async (c) => {
     if (name.length < 2 || name.length > 100) {
       return Errors.validation(c, [{ path: 'name', message: 'الاسم يجب أن يكون بين حرفين و 100 حرف' }]);
     }
-    if (member_id.length < 2 || member_id.length > 50) {
-      return Errors.validation(c, [{ path: 'member_id', message: 'رقم العضوية يجب أن يكون بين حرفين و 50 حرف' }]);
+    // Accept member_id from 1 character (allows 1, 2, 3, etc.)
+    if (member_id.length < 1 || member_id.length > 50) {
+      return Errors.validation(c, [{ path: 'member_id', message: 'رقم العضوية غير صحيح' }]);
     }
 
     // 2. MANDATORY AUDIO VALIDATION
