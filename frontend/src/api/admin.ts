@@ -165,3 +165,47 @@ export function getAudioPlaybackUrl(registrationId: string): string {
 export function getExportCsvUrl(missionId: string): string {
   return `/api/admin/missions/${missionId}/export`;
 }
+
+// Toggle registration open/close
+export async function toggleMissionRegistration(missionId: string): Promise<{ is_registration_open: boolean; message: string }> {
+  const res = await fetch(`/api/admin/missions/${missionId}/toggle-registration`, {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error?.message || 'فشل تغيير حالة التسجيل');
+  }
+  return data.data;
+}
+
+// Edit mission details (title, description, location, capacity, dates)
+export async function editMissionDetails(missionId: string, payload: {
+  title?: string;
+  description?: string | null;
+  location?: string | null;
+  capacity?: number;
+  start_at?: string;
+  end_at?: string;
+}): Promise<Mission> {
+  const res = await fetch(`/api/admin/missions/${missionId}/details`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error?.message || 'فشل تعديل تفاصيل المهمة');
+  }
+  return data.data;
+}
+
+// Close mission permanently
+export async function closeMission(missionId: string): Promise<void> {
+  const res = await fetch(`/api/admin/missions/${missionId}/close`, {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error?.message || 'فشل إغلاق المهمة');
+  }
+}
