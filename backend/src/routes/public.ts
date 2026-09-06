@@ -24,7 +24,7 @@ function checkRateLimit(key: string, maxRequests = 20, windowMs = 60000): boolea
   return true;
 }
 
-// GET /api/missions/:publicCode or /api/public/missions/:publicCode
+// GET /api/missions/:publicCode
 publicRoutes.get('/missions/:publicCode', async (c) => {
   try {
     const publicCode = c.req.param('publicCode');
@@ -86,7 +86,49 @@ publicRoutes.get('/missions/:publicCode', async (c) => {
   }
 });
 
-// GET /api/volunteers/by-member-id/:memberId or /api/public/volunteers/by-member-id/:memberId
+// GET /api/missions/:publicCode/registrations-live — live registration feed
+publicRoutes.get('/missions/:publicCode/registrations-live', async (c) => {
+  try {
+    const publicCode = c.req.param('publicCode');
+    
+    const mission = await c.env.DB.prepare(`
+      SELECT id FROM missions WHERE public_code = ?
+    `).bind(publicCode).first();
+    
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
+    }
+    
+    const missionData = mission as any;
+    
+    const result = await c.env.DB.prepare(`
+      SELECT r.id, v.name, v.member_id, r.status, r.seat_number, 
+             r.waitlist_position, r.created_at
+      FROM registrations r
+      JOIN volunteers v ON v.id = r.volunteer_id
+      WHERE r.mission_id = ?
+      ORDER BY r.registration_sequence ASC
+      LIMIT 50
+    `).bind(missionData.id).all();
+    
+    const registrations = (result.results || []).map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      member_id: row.member_id,
+      status: row.status,
+      seat_number: row.seat_number,
+      waitlist_position: row.waitlist_position,
+      created_at: row.created_at,
+    }));
+    
+    return success(c, registrations);
+  } catch (err: any) {
+    console.error('Live registrations error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// GET /api/volunteers/by-member-id/:memberId
 publicRoutes.get('/volunteers/by-member-id/:memberId', async (c) => {
   try {
     const memberId = c.req.param('memberId').trim();

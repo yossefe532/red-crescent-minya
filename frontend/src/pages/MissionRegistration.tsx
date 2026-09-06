@@ -2,12 +2,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getMission, lookupMemberId, submitRegistration, Mission, RegistrationResult } from '../api/public';
 
+interface LiveVolunteer {
+  id: string;
+  name: string;
+  member_id: string;
+  status: string;
+  seat_number: number | null;
+  waitlist_position: number | null;
+  created_at: string;
+}
+
 export function MissionRegistration() {
   const { code } = useParams<{ code: string }>();
 
   const [mission, setMission] = useState<Mission | null>(null);
   const [loadingMission, setLoadingMission] = useState(true);
   const [missionError, setMissionError] = useState<string | null>(null);
+
+  // Live registration table state
+  const [liveRegistrations, setLiveRegistrations] = useState<LiveVolunteer[]>([]);
 
   // Form fields
   const [memberId, setMemberId] = useState('');
@@ -52,7 +65,29 @@ export function MissionRegistration() {
     return () => clearInterval(interval);
   }, [code]);
 
-  // 2. Member ID Lookup debounce
+  // 2. Live registrations polling every 3 seconds
+  const fetchLiveRegistrations = async () => {
+    if (!code) return;
+    try {
+      const res = await fetch(`/api/missions/${code}/registrations-live`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setLiveRegistrations(data.data || []);
+        }
+      }
+    } catch {
+      // silently ignore live feed errors
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveRegistrations();
+    const interval = setInterval(fetchLiveRegistrations, 3000);
+    return () => clearInterval(interval);
+  }, [code]);
+
+  // 3. Member ID Lookup debounce
   useEffect(() => {
     const trimmed = memberId.trim();
     if (trimmed.length < 2) {
@@ -80,7 +115,7 @@ export function MissionRegistration() {
     return () => clearTimeout(timer);
   }, [memberId]);
 
-  // 3. Audio Recording Handling
+  // 4. Audio Recording Handling
   const startRecording = async () => {
     setMicError(null);
     setAudioBlob(null);
@@ -92,7 +127,6 @@ export function MissionRegistration() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const options = { mimeType: 'audio/webm' };
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : MediaRecorder.isTypeSupported('audio/webm')
@@ -157,7 +191,7 @@ export function MissionRegistration() {
     setMicError(null);
   };
 
-  // 4. Form Submission
+  // 5. Form Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
@@ -199,13 +233,10 @@ export function MissionRegistration() {
   const formatDateTime = (isoStr?: string) => {
     if (!isoStr) return '';
     const d = new Date(isoStr);
-    return d.toLocaleString('ar-EG', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+    return d.toLocaleTimeString('ar-EG', {
       hour: '2-digit',
       minute: '2-digit',
+      second: '2-digit',
     });
   };
 
@@ -223,7 +254,7 @@ export function MissionRegistration() {
   if (missionError || !mission) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center border border-red-100">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-md w-full text-center border border-red-100">
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
             ⚠️
           </div>
@@ -352,6 +383,56 @@ export function MissionRegistration() {
             </div>
           </div>
         </div>
+
+        {/* LIVE REGISTRATION TABLE */}
+        {liveRegistrations.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200/80 overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                التسجيلات الحية
+                <span className="text-xs font-normal text-slate-400">({liveRegistrations.length})</span>
+              </h3>
+              <span className="text-[10px] text-slate-400 font-medium">تحديث تلقائي كل 3 ثواني</span>
+            </div>
+            <div className="overflow-x-auto max-h-64 overflow-y-auto">
+              <table className="w-full text-right text-[11px]">
+                <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-100 sticky top-0">
+                  <tr>
+                    <th className="py-2 px-2">#</th>
+                    <th className="py-2 px-2">الاسم</th>
+                    <th className="py-2 px-2 font-mono">العضوية</th>
+                    <th className="py-2 px-2">الحالة</th>
+                    <th className="py-2 px-2">المقعد</th>
+                    <th className="py-2 px-2">وقت التسجيل</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {liveRegistrations.map((reg, idx) => (
+                    <tr key={reg.id} className={idx === 0 ? 'bg-emerald-50/50' : ''}>
+                      <td className="py-1.5 px-2 font-mono font-bold text-slate-400">{reg.seat_number || reg.waitlist_position || idx + 1}</td>
+                      <td className="py-1.5 px-2 font-bold text-slate-900">{reg.name}</td>
+                      <td className="py-1.5 px-2 font-mono text-slate-700">{reg.member_id}</td>
+                      <td className="py-1.5 px-2">
+                        <span className={`px-1.5 py-0.5 rounded-full font-bold ${
+                          reg.status === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
+                          reg.status === 'WAITLIST' ? 'bg-amber-100 text-amber-800' :
+                          'bg-slate-100 text-slate-600'
+                        }`}>
+                          {reg.status === 'CONFIRMED' ? 'مؤكد' : reg.status === 'WAITLIST' ? 'انتظار' : 'ملغي'}
+                        </span>
+                      </td>
+                      <td className="py-1.5 px-2 font-mono text-slate-700">
+                        {reg.status === 'CONFIRMED' ? `#${reg.seat_number}` : `#${reg.waitlist_position}`}
+                      </td>
+                      <td className="py-1.5 px-2 text-slate-500 font-mono">{formatDateTime(reg.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Registration Form */}
         <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-sm border border-slate-200/80 p-6 space-y-6">

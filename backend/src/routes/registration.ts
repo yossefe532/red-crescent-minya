@@ -171,10 +171,13 @@ publicRegistrationRoutes.post('/register', async (c) => {
       storedName = (volunteer as any).name || name;
     }
 
-    // 6. Check duplicate registration for same mission
+    // 6. Check duplicate registration for same mission (member_id based)
     const existingRegistration = await c.env.DB.prepare(
-      `SELECT id, status, seat_number, waitlist_position, registration_sequence FROM registrations WHERE mission_id = ? AND volunteer_id = ?`
-    ).bind(missionData.id, volunteerId).first();
+      `SELECT r.id, r.status, r.seat_number, r.waitlist_position, r.registration_sequence 
+       FROM registrations r
+       JOIN volunteers v ON v.id = r.volunteer_id
+       WHERE r.mission_id = ? AND v.member_id = ?`
+    ).bind(missionData.id, member_id).first();
 
     if (existingRegistration) {
       const ex = existingRegistration as any;
