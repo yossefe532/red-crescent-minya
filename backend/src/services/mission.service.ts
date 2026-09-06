@@ -42,9 +42,9 @@ export async function createMission(db: D1Database, data: MissionCreateData, cre
   const now = new Date().toISOString();
   const confirmationPhrase = `أؤكد مشاركتي في مهمة ${publicCode}`;
   
-  // Set registration window to open now and close 1 hour before mission start
-  const registrationOpenAt = now;
-  const registrationCloseAt = new Date(new Date(data.start_at).getTime() - 60 * 60 * 1000).toISOString();
+  // Registration window defaults to open immediately and close at end of mission
+  const registrationOpenAt = (data as any).registration_open_at ?? now;
+  const registrationCloseAt = (data as any).registration_close_at ?? data.end_at;
 
   try {
     const result = await db.prepare(`
