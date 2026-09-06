@@ -138,14 +138,19 @@ export async function updateMission(db: D1Database, id: string, data: Record<str
 
   const setClause = fields.map(field => `${field} = ?`).join(', ');
   const values = fields.map(field => data[field]);
-  values.push(id);
-
+  
   const now = new Date().toISOString();
-  values.push(now);
+  
+  // Build the full UPDATE statement with updated_at
+  const updateQuery = `UPDATE missions SET ${setClause}, updated_at = ? WHERE id = ?`;
+  const allValues = [...values, now, id];
 
   try {
-    await db.prepare(`UPDATE missions SET ${setClause}, updated_at = ? WHERE id = ?`).bind(...values).run();
-    return getMissionById(db, id);
+    await db.prepare(updateQuery).bind(...allValues).run();
+    
+    // IMPORTANT: Re-fetch to get the updated mission with all changes
+    const updated = await getMissionById(db, id);
+    return updated;
   } catch (error) {
     console.error('Error updating mission:', error);
     throw error;

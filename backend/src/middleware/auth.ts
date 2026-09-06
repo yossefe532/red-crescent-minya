@@ -45,17 +45,28 @@ export async function getSession(token: string, env: Env): Promise<{ adminId: st
 }
 
 export async function adminAuth(c: Context<AppEnv>, next: Next) {
-  const cookie = c.req.header('cookie');
-  if (!cookie) {
+  // Support both Cookie (rc_session) and X-Auth-Token header
+  let token: string | null = null;
+
+  // 1. Try X-Auth-Token header first (for API calls)
+  const authHeader = c.req.header('X-Auth-Token');
+  if (authHeader) {
+    token = authHeader.trim();
+  } else {
+    // 2. Fall back to Cookie (for browser requests)
+    const cookie = c.req.header('cookie');
+    if (cookie) {
+      const match = cookie.match(/rc_session=([^;]+)/);
+      if (match) {
+        token = match[1].trim();
+      }
+    }
+  }
+
+  if (!token) {
     return c.json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required.' } }, 401);
   }
 
-  const match = cookie.match(/rc_session=([^;]+)/);
-  if (!match) {
-    return c.json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required.' } }, 401);
-  }
-
-  const token = match[1].trim();
   const session = await getSession(token, c.env);
   if (!session) {
     return c.json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required.' } }, 401);

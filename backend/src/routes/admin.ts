@@ -216,6 +216,79 @@ adminRoutes.post('/missions/:id/toggle-registration', adminAuth, async (c) => {
   }
 });
 
+// PATCH /api/admin/missions/:id/details - Edit mission details (title, description, location, capacity, dates)
+adminRoutes.patch('/missions/:id/details', adminAuth, async (c) => {
+  try {
+    const id = c.req.param('id') as string;
+    const body = await c.req.json();
+
+    const mission = await getMissionById(c.env.DB, id);
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
+    }
+
+    // Validate and prepare updates
+    const updates: Record<string, unknown> = {};
+    
+    if (body.title !== undefined) {
+      if (!body.title || body.title.trim().length < 3) {
+        return Errors.validation(c, [{ path: 'title', message: 'عنوان المهمة يجب أن يكون 3 أحرف على الأقل' }]);
+      }
+      updates.title = body.title.trim();
+    }
+
+    if (body.description !== undefined) {
+      updates.description = body.description?.trim() || null;
+    }
+
+    if (body.location !== undefined) {
+      updates.location = body.location?.trim() || null;
+    }
+
+    if (body.capacity !== undefined) {
+      const cap = Number(body.capacity);
+      if (isNaN(cap) || cap < 1 || cap > 1000) {
+        return Errors.validation(c, [{ path: 'capacity', message: 'السعة يجب أن تكون بين 1 و 1000' }]);
+      }
+      updates.capacity = cap;
+    }
+
+    if (body.start_at !== undefined) {
+      updates.start_at = new Date(body.start_at).toISOString();
+    }
+
+    if (body.end_at !== undefined) {
+      updates.end_at = new Date(body.end_at).toISOString();
+    }
+
+    // Validate dates if both provided
+    if (updates.start_at && updates.end_at) {
+      if (new Date(updates.start_at as string) >= new Date(updates.end_at as string)) {
+        return Errors.validation(c, [{ path: 'dates', message: 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية' }]);
+      }
+    }
+
+    const updated = await updateMission(c.env.DB, id, updates);
+
+    const adminId = getAdminId(c);
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'MISSION_DETAILS_UPDATED',
+      entityType: 'mission',
+      entityId: id,
+    });
+
+    return success(c, { 
+      mission: updated,
+      message: 'تم تحديث تفاصيل المهمة بنجاح'
+    });
+  } catch (err: any) {
+    console.error('Update mission details error:', err);
+    return Errors.internal(c);
+  }
+});
+
 // POST /api/admin/missions/:id/close - Close mission permanently
 adminRoutes.post('/missions/:id/close', adminAuth, async (c) => {
   try {
