@@ -10,44 +10,70 @@ interface Props {
 
 export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
   const [activeTab, setActiveTab] = useState<'overview' | 'edit' | 'settings'>('overview');
+  const navigate = useNavigate();
+
+  // Optimistic state - local copy that updates immediately
+  const [localMission, setLocalMission] = useState<Mission>(mission);
   
-  // Edit form state
-  const [editTitle, setEditTitle] = useState(mission.title);
-  const [editDescription, setEditDescription] = useState(mission.description || '');
-  const [editLocation, setEditLocation] = useState(mission.location || '');
-  const [editCapacity, setEditCapacity] = useState(mission.capacity);
-  const [editStartDate, setEditStartDate] = useState(mission.start_at.slice(0, 16));
-  const [editEndDate, setEditEndDate] = useState(mission.end_at.slice(0, 16));
+  // Sync localMission with props when they change
+  useEffect(() => {
+    setLocalMission(mission);
+  }, [mission]);
+  
+  // Edit form state - initialize from localMission
+  const [editTitle, setEditTitle] = useState(localMission.title);
+  const [editDescription, setEditDescription] = useState(localMission.description || '');
+  const [editLocation, setEditLocation] = useState(localMission.location || '');
+  const [editCapacity, setEditCapacity] = useState(localMission.capacity);
+  const [editStartDate, setEditStartDate] = useState(localMission.start_at.slice(0, 16));
+  const [editEndDate, setEditEndDate] = useState(localMission.end_at.slice(0, 16));
   
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Calculate registration status
+  // Calculate registration status from LOCAL mission (instant)
   const now = new Date();
-  const regOpenAt = mission.registration_open_at ? new Date(mission.registration_open_at) : null;
-  const regCloseAt = mission.registration_close_at ? new Date(mission.registration_close_at) : null;
-  const isRegOpen = mission.status === 'OPEN' && 
+  const regOpenAt = localMission.registration_open_at ? new Date(localMission.registration_open_at) : null;
+  const regCloseAt = localMission.registration_close_at ? new Date(localMission.registration_close_at) : null;
+  const isRegOpen = localMission.status === 'OPEN' && 
                     regOpenAt && regOpenAt <= now && 
                     (!regCloseAt || regCloseAt > now);
 
-  // Handle toggle registration
+  // Optimistic update helper
+  const optimisticUpdate = (updates: Partial<Mission>) => {
+    setLocalMission(prev => ({ ...prev, ...updates }));
+  };
+
+  // Handle toggle registration - OPTIMISTIC
   const handleToggleRegistration = async () => {
-    setIsSaving(true);
-    setSaveError(null);
+    // 1. Instant optimistic update
+    const newRegOpen = !isRegOpen;
+    optimisticUpdate({ 
+      registration_close_at: newRegOpen ? localMission.end_at : new Date().toISOString(),
+      registration_open_at: newRegOpen ? new Date().toISOString() : localMission.registration_open_at,
+      status: 'OPEN' // stays OPEN when toggling registration
+    });
+    
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
+    onUpdate(); // Notify parent
+    
+    // 2. Background API call (non-blocking)
     try {
-      await toggleMissionRegistration(mission.id, !isRegOpen);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-      await onUpdate();
+      await toggleMissionRegistration(localMission.id, newRegOpen);
     } catch (err: any) {
+      // Rollback on error
+      optimisticUpdate({ 
+        registration_close_at: isRegOpen ? localMission.end_at : new Date().toISOString(),
+        registration_open_at: isRegOpen ? new Date().toISOString() : localMission.registration_open_at
+      });
       setSaveError(err.message || 'فشل تغيير حالة التسجيل');
-    } finally {
-      setIsSaving(false);
+      setTimeout(() => setSaveError(null), 3000);
     }
   };
 
-  // Handle save mission details
+  // Handle save mission details - OPTIMISTIC
   const handleSaveDetails = async () => {
     if (!editTitle.trim()) {
       setSaveError('عنوان المهمة مطلوب');
@@ -58,47 +84,77 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
       return;
     }
 
-    setIsSaving(true);
-    setSaveError(null);
+    // 1. Instant optimistic update
+    const updates = {
+      title: editTitle.trim(),
+      description: editDescription.trim() || null,
+      location: editLocation.trim() || null,
+      capacity: editCapacity,
+      start_at: new Date(editStartDate).toISOString(),
+      end_at: new Date(editEndDate).toISOString(),
+    };
+    optimisticUpdate(updates);
+    
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
+    onUpdate(); // Notify parent
+    
+    // 2. Background API call
     try {
-      await updateMissionDetails(mission.id, {
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
-        location: editLocation.trim() || null,
-        capacity: editCapacity,
-        start_at: new Date(editStartDate).toISOString(),
-        end_at: new Date(editEndDate).toISOString(),
-      });
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-      await onUpdate();
+      await updateMissionDetails(localMission.id, updates);
     } catch (err: any) {
+      // Rollback on error
+      optimisticUpdate({
+        title: localMission.title,
+        description: localMission.description,
+        location: localMission.location,
+        capacity: localMission.capacity,
+        start_at: localMission.start_at,
+        end_at: localMission.end_at,
+      });
+      // Reset form fields
+      setEditTitle(localMission.title);
+      setEditDescription(localMission.description || '');
+      setEditLocation(localMission.location || '');
+      setEditCapacity(localMission.capacity);
+      setEditStartDate(localMission.start_at.slice(0, 16));
+      setEditEndDate(localMission.end_at.slice(0, 16));
+      
       setSaveError(err.message || 'فشل حفظ التعديلات');
-    } finally {
-      setIsSaving(false);
+      setTimeout(() => setSaveError(null), 3000);
     }
   };
 
-  // Handle close mission permanently
+  // Handle close mission permanently - merged: optimistic + confirm
   const handleCloseMission = async () => {
     if (!confirm('هل أنت متأكد من إغلاق المهمة نهائياً؟ لن يتمكن أحد من التسجيل بعد الإغلاق.')) {
       return;
     }
     
-    setIsSaving(true);
-    setSaveError(null);
+    // 1. Instant optimistic update
+    optimisticUpdate({ 
+      status: 'CLOSED',
+      registration_close_at: new Date().toISOString()
+    });
+    
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
+    onUpdate(); // Notify parent
+    
+    // 2. Background API call
     try {
-      await updateMission(mission.id, { status: 'CLOSED' });
-      setSaveSuccess(true);
-      setTimeout(() => {
-        setSaveSuccess(false);
-        onClose();
-      }, 2000);
-      await onUpdate();
+      await fetch(`/api/admin/missions/${localMission.id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
     } catch (err: any) {
+      // Rollback on error
+      optimisticUpdate({ 
+        status: 'OPEN',
+        registration_close_at: localMission.end_at
+      });
       setSaveError(err.message || 'فشل إغلاق المهمة');
-    } finally {
-      setIsSaving(false);
+      setTimeout(() => setSaveError(null), 3000);
     }
   };
 
@@ -185,7 +241,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                   <div className="text-xs text-slate-500 font-bold mb-1">السعة المطلوبة</div>
-                  <div className="text-3xl font-black text-slate-900">{mission.capacity}</div>
+                  <div className="text-3xl font-black text-slate-900">{localMission.capacity}</div>
                   <div className="text-xs text-slate-600 mt-1">متطوع</div>
                 </div>
                 
@@ -202,13 +258,13 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
 
               <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
                 <div className="text-xs text-blue-700 font-bold mb-2">📍 المكان</div>
-                <div className="text-sm text-blue-900 font-semibold">{mission.location || 'غير محدد'}</div>
+                <div className="text-sm text-blue-900 font-semibold">{localMission.location || 'غير محدد'}</div>
               </div>
 
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
                 <div className="text-xs text-amber-700 font-bold mb-2">📝 الوصف</div>
                 <div className="text-sm text-amber-900 leading-relaxed">
-                  {mission.description || 'لا يوجد وصف'}
+                  {localMission.description || 'لا يوجد وصف'}
                 </div>
               </div>
 
@@ -217,11 +273,11 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
                 <div className="space-y-1.5 text-xs text-purple-900">
                   <div className="flex justify-between">
                     <span className="font-medium">بداية المهمة:</span>
-                    <span className="font-bold">{new Date(mission.start_at).toLocaleString('ar-EG')}</span>
+                    <span className="font-bold">{new Date(localMission.start_at).toLocaleString('ar-EG')}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium">نهاية المهمة:</span>
-                    <span className="font-bold">{new Date(mission.end_at).toLocaleString('ar-EG')}</span>
+                    <span className="font-bold">{new Date(localMission.end_at).toLocaleString('ar-EG')}</span>
                   </div>
                 </div>
               </div>
@@ -229,7 +285,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                 <div className="text-xs text-slate-700 font-bold mb-2">🎤 عبارة التأكيد الصوتي</div>
                 <div className="text-sm text-slate-900 font-semibold bg-white px-3 py-2 rounded-lg border border-slate-200">
-                  "{mission.confirmation_phrase}"
+                  "{localMission.confirmation_phrase}"
                 </div>
               </div>
             </div>
@@ -365,16 +421,16 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
                   disabled={isSaving || mission.status === 'CLOSED'}
                   className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-400 text-white font-bold py-3 px-6 rounded-xl transition shadow-md"
                 >
-                  {mission.status === 'CLOSED' ? '✓ المهمة مغلقة بالفعل' : '🚫 إغلاق المهمة نهائياً'}
-                </button>
-              </div>
+                  {localMission.status === 'CLOSED' ? '✓ المهمة مغلقة بالفعل' : '🚫 إغلاق المهمة نهائياً'}
+                  </button>
+                  </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                <h3 className="text-sm font-black text-slate-900 mb-2">معلومات النظام</h3>
-                <div className="space-y-1.5 text-xs text-slate-700">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
+                  <h3 className="text-sm font-black text-slate-900 mb-2">معلومات النظام</h3>
+                  <div className="space-y-1.5 text-xs text-slate-700">
                   <div className="flex justify-between">
-                    <span>تاريخ الإنشاء:</span>
-                    <span className="font-mono font-bold">{new Date(mission.created_at).toLocaleString('ar-EG')}</span>
+                  <span>تاريخ الإنشاء:</span>
+                  <span className="font-mono font-bold">{new Date(localMission.created_at).toLocaleString('ar-EG')}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>معرّف المهمة:</span>
