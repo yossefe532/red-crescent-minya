@@ -1,82 +1,70 @@
-# Red Crescent Minya — Smart Mission Registration System
+# Red Crescent Minya - Smart Mission Registration System MVP
 
-## Quick Start
+## 🏗️ Architecture
+
+- **Backend**: Cloudflare Workers (Hono + TypeScript)
+- **Database**: Cloudflare D1 (SQLite)
+- **Storage**: Cloudflare R2 (audio files)
+- **Frontend**: React + Vite + TailwindCSS (RTL)
+- **Deployment**: Cloudflare Pages
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js v24+ (already installed)
-- Cloudflare account (free tier)
-- Wrangler CLI: `npm install -g wrangler`
+- Node.js v24+
+- npm 11+
+- wrangler 3.x (`npm install -g wrangler`)
 
-### Development
-
+### Backend Setup
 ```bash
-# Backend
 cd backend
 npm install
-npm run dev          # Local Workers + D1
+npx wrangler d1 execute red-crescent-minya --file=./migrations/0001_init.sql --local
+npm run dev  # Port 8787
+```
 
-# Frontend
+### Frontend Setup
+```bash
 cd frontend
 npm install
-npm run dev          # Vite dev server
+npm run dev  # Port 5173
 ```
 
-### Deployment
+### Admin Credentials
+- Username: `admin`
+- Password: `admin123`
 
-```bash
-# Backend
-cd backend
-npm run deploy       # Workers + D1 + R2
+## 📋 Features
+- Mission creation with registration management
+- Volunteer registration with voice confirmation
+- Quick profile save/load
+- Temporary registration (without member ID)
+- Live registration table (3s polling)
+- Mission control panel (toggle/edit/close)
+- CSV export with UTF-8 BOM (Excel Arabic compatible)
+- Duplicate registration prevention (member_id per mission)
+- Auto-promotion from waitlist to confirmed
 
-# Frontend
-cd frontend
-npm run build        # Output to dist/
-```
+## 🔐 Security
+- Admin sessions in D1 (24h expiry)
+- Password hashing (bcrypt via Cloudflare bindings)
+- No API keys in source code - all secrets in environment variables
+- X-Auth-Token header + Cookie authentication
 
-## Project Structure
+## 📊 Database Tables
+- `admin_users` - Admin accounts
+- `admin_sessions` - Session management
+- `missions` - Mission data
+- `registrations` - Volunteer registrations
+- `audio_confirmations` - Voice recordings (R2 storage)
+- `volunteers` - Volunteer profiles
+- `registration_attempts` - Audit trail
+- `audit_log` - System audit
+- `quick_profiles` - Quick profile save
 
-```
-red-crescent-minya/
-├── docs/                    # Documentation
-├── backend/                 # Cloudflare Workers API
-│   ├── src/
-│   │   ├── index.ts         # Hono app entry
-│   │   ├── env.ts           # Environment bindings
-│   │   ├── middleware/      # Auth, rate-limit, error-handler
-│   │   ├── routes/          # public, registration, admin
-│   │   ├── services/        # Business logic
-│   │   ├── db/              # Schema + queries
-│   │   ├── validation/      # Zod schemas
-│   │   └── utils/           # ID generators, crypto
-│   ├── migrations/          # D1 SQL migrations
-│   ├── wrangler.toml        # Cloudflare config
-│   └── package.json
-├── frontend/                # React + Vite
-│   ├── src/
-│   │   ├── main.tsx         # React entry
-│   │   ├── App.tsx          # Router
-│   │   ├── components/      # UI components
-│   │   ├── pages/           # Mission, Result, Admin
-│   │   ├── features/        # Feature modules
-│   │   ├── lib/             # API client, query config
-│   │   └── utils/           # Helpers
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   └── package.json
-└── README.md
-```
+## 🔄 Migration History
+- `migrations/0001_init.sql` - 8 tables (initial)
+- `migrations/0002_add_phone_and_quick_register.sql` - Phone + quick profiles
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Cloudflare Workers + Hono |
-| Database | Cloudflare D1 (SQLite) |
-| Storage | Cloudflare R2 |
-| Frontend | React + Vite + Tailwind CSS |
-| Auth | Cookie-based sessions |
-| Validation | Zod |
-
-## License
-
-Internal project for Egyptian Red Crescent — Minya Branch.
+## 📝 License
+Private - Egyptian Red Crescent Minya Branch
