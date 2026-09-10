@@ -9,3 +9,4 @@ dist/
 *.webm
 .dev.vars
 .env
+cookies.txt

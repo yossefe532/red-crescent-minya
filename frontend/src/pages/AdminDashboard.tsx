@@ -4,11 +4,12 @@ import {
   logoutAdmin, 
   listMissions, 
   createMission, 
-  updateMission,
-  getMissionRegistrations,
-  cancelRegistration,
-  getAudioPlaybackUrl,
-  getExportCsvUrl,
+  updateMission, 
+  getMissionRegistrations, 
+  cancelRegistration, 
+  getAudioPlaybackUrl, 
+  getExportCsvUrl, 
+  checkSession,
   Mission, 
   Registration, 
   AdminUser,
@@ -54,25 +55,39 @@ export function AdminDashboard() {
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  // Check login / load missions
+  // Check existing session on mount, then load missions
+  useEffect(() => {
+    (async () => {
+      setLoadingMissions(true);
+      try {
+        const user = await checkSession();
+        if (user) {
+          setAdminUser(user);
+          const data = await listMissions();
+          setMissions(data.missions);
+        } else {
+          setAdminUser(null);
+        }
+      } catch {
+        setAdminUser(null);
+      } finally {
+        setLoadingMissions(false);
+      }
+    })();
+  }, []);
+
+  // Load missions list (reusable)
   const loadMissionsList = async () => {
     setLoadingMissions(true);
     try {
       const data = await listMissions();
       setMissions(data.missions);
-      if (!adminUser) {
-        setAdminUser({ admin_id: 'active', username: 'admin', display_name: 'مدير النظام' });
-      }
     } catch {
       setAdminUser(null);
     } finally {
       setLoadingMissions(false);
     }
   };
-
-  useEffect(() => {
-    loadMissionsList();
-  }, []);
 
   // Load registrations when selected mission or filters change
   const loadRegistrations = async (missionId: string) => {
@@ -110,7 +125,8 @@ export function AdminDashboard() {
     try {
       const user = await loginAdmin(loginUsername, loginPassword);
       setAdminUser(user);
-      await loadMissionsList();
+      const data = await listMissions();
+      setMissions(data.missions);
     } catch (err: any) {
       setLoginError(err.message || 'بيانات تسجيل الدخول غير صحيحة');
     } finally {

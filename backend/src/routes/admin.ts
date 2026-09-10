@@ -49,7 +49,8 @@ adminRoutes.post('/login', async (c) => {
 adminRoutes.post('/logout', adminAuth, async (c) => {
   try {
     const adminId = getAdminId(c);
-    const token = c.req.header('Authorization')?.replace('Bearer ', '');
+    // Try X-Auth-Token first, then Authorization header
+    const token = c.req.header('X-Auth-Token') || c.req.header('Authorization')?.replace('Bearer ', '');
     if (token) {
       await c.env.DB.prepare('DELETE FROM admin_sessions WHERE token = ?').bind(token).run();
     }

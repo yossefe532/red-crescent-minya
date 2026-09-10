@@ -19,7 +19,7 @@ app.use('*', cors({
     'https://red-crescent-minya.pages.dev',
   ],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Auth-Token', 'Cookie'],
   credentials: true,
 }));
 

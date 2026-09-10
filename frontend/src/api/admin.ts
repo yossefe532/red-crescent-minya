@@ -1,3 +1,35 @@
+const TOKEN_KEY = 'rc_admin_token';
+
+function getToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {}
+}
+
+function clearToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {}
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['X-Auth-Token'] = token;
+  }
+  return headers;
+}
+
+// ------- Types -------
 export interface AdminUser {
   admin_id: string;
   username: string;
@@ -55,6 +87,7 @@ export interface Registration {
   duration_ms: number | null;
 }
 
+// ------- Auth API -------
 export async function loginAdmin(username: string, password: string): Promise<AdminUser> {
   const res = await fetch('/api/admin/login', {
     method: 'POST',
@@ -65,15 +98,49 @@ export async function loginAdmin(username: string, password: string): Promise<Ad
   if (!res.ok || !data.success) {
     throw new Error(data.error?.message || 'فشل تسجيل الدخول');
   }
-  return data.data;
+  // Store the session token for subsequent requests
+  if (data.data?.token) {
+    setToken(data.data.token);
+  }
+  return { admin_id: data.data.admin_id, username: data.data.username, display_name: data.data.display_name };
 }
 
 export async function logoutAdmin(): Promise<void> {
-  await fetch('/api/admin/logout', { method: 'POST' });
+  try {
+    await fetch('/api/admin/logout', {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+  } catch {}
+  clearToken();
 }
 
+/** Validate existing token; returns user info or null */
+export async function checkSession(): Promise<AdminUser | null> {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const res = await fetch('/api/admin/missions', {
+      headers: authHeaders(),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        return { admin_id: 'active', username: 'admin', display_name: 'مدير النظام' };
+      }
+    }
+    // Token invalid/expired — clear it
+    clearToken();
+    return null;
+  } catch {
+    clearToken();
+    return null;
+  }
+}
+
+// ------- Missions API -------
 export async function listMissions(): Promise<{ missions: Mission[]; total: number }> {
-  const res = await fetch('/api/admin/missions');
+  const res = await fetch('/api/admin/missions', { headers: authHeaders() });
   const data = await res.json();
   if (!res.ok || !data.success) {
     throw new Error(data.error?.message || 'فشل جلب المهمات');
@@ -82,7 +149,7 @@ export async function listMissions(): Promise<{ missions: Mission[]; total: numb
 }
 
 export async function getMission(id: string): Promise<Mission & { confirmed: number; waitlist: number; available: number }> {
-  const res = await fetch(`/api/admin/missions/${id}`);
+  const res = await fetch(`/api/admin/missions/${id}`, { headers: authHeaders() });
   const data = await res.json();
   if (!res.ok || !data.success) {
     throw new Error(data.error?.message || 'فشل جلب تفاصيل المهمة');
@@ -93,7 +160,7 @@ export async function getMission(id: string): Promise<Mission & { confirmed: num
 export async function createMission(payload: MissionCreateData): Promise<MissionCreateResponse> {
   const res = await fetch('/api/admin/missions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
@@ -106,7 +173,7 @@ export async function createMission(payload: MissionCreateData): Promise<Mission
 export async function updateMission(id: string, payload: Partial<Mission>): Promise<Mission> {
   const res = await fetch(`/api/admin/missions/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
@@ -117,7 +184,10 @@ export async function updateMission(id: string, payload: Partial<Mission>): Prom
 }
 
 export async function deleteMission(id: string): Promise<void> {
-  const res = await fetch(`/api/admin/missions/${id}`, { method: 'DELETE' });
+  const res = await fetch(`/api/admin/missions/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
   const data = await res.json();
   if (!res.ok || !data.success) {
     throw new Error(data.error?.message || 'فشل حذف المهمة');
@@ -135,7 +205,9 @@ export async function getMissionRegistrations(missionId: string, query?: { statu
   if (query?.status) params.set('status', query.status);
   if (query?.search) params.set('search', query.search);
 
-  const res = await fetch(`/api/admin/missions/${missionId}/registrations?${params.toString()}`);
+  const res = await fetch(`/api/admin/missions/${missionId}/registrations?${params.toString()}`, {
+    headers: authHeaders(),
+  });
   const data = await res.json();
   if (!res.ok || !data.success) {
     throw new Error(data.error?.message || 'فشل جلب قائمة المتطوعين');
@@ -150,6 +222,7 @@ export async function cancelRegistration(registrationId: string): Promise<{
 }> {
   const res = await fetch(`/api/admin/registrations/${registrationId}/cancel`, {
     method: 'POST',
+    headers: authHeaders(),
   });
   const data = await res.json();
   if (!res.ok || !data.success) {
@@ -170,7 +243,7 @@ export function getExportCsvUrl(missionId: string): string {
 export async function toggleMissionRegistration(missionId: string, open: boolean): Promise<Mission> {
   const res = await fetch(`/api/admin/missions/${missionId}/toggle-registration`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ open }),
   });
   const data = await res.json();
@@ -180,7 +253,7 @@ export async function toggleMissionRegistration(missionId: string, open: boolean
   return data.data.mission;
 }
 
-// Edit mission details (title, description, location, capacity, dates)
+// Edit mission details
 export async function updateMissionDetails(missionId: string, payload: {
   title?: string;
   description?: string | null;
@@ -191,7 +264,7 @@ export async function updateMissionDetails(missionId: string, payload: {
 }): Promise<Mission> {
   const res = await fetch(`/api/admin/missions/${missionId}/details`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
