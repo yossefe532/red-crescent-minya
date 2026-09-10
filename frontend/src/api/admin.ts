@@ -247,6 +247,18 @@ export function getAudioPlaybackUrl(registrationId: string): string {
   return `/api/admin/registrations/${registrationId}/audio`;
 }
 
+// Fetch audio WITH auth header and return an object URL for <audio> playback
+export async function fetchAudioPlaybackUrl(registrationId: string): Promise<string> {
+  const res = await fetch(getAudioPlaybackUrl(registrationId), {
+    headers: { ...authHeaders() },
+  });
+  if (!res.ok) {
+    throw new Error(`فشل تحميل التسجيل الصوتي (${res.status})`);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export function getExportCsvUrl(missionId: string): string {
   return `/api/admin/missions/${missionId}/export`;
 }

@@ -7,7 +7,7 @@ import {
   updateMission, 
   getMissionRegistrations, 
   cancelRegistration, 
-  getAudioPlaybackUrl, 
+  fetchAudioPlaybackUrl, 
   getExportCsvUrl, 
   checkSession,
   Mission, 
@@ -53,7 +53,27 @@ export function AdminDashboard() {
 
   // Audio player state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
+
+  // Load audio with auth header, then play
+  const handlePlayAudio = async (registrationId: string) => {
+    try {
+      // Revoke previous object URL
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+      setAudioError(null);
+      const url = await fetchAudioPlaybackUrl(registrationId);
+      setAudioUrl(url);
+      setPlayingAudioId(registrationId);
+    } catch (err: any) {
+      setAudioError(err?.message || 'فشل تحميل التسجيل الصوتي');
+      console.error('Audio fetch failed:', err);
+      // Auto-clear error after 5s
+      setTimeout(() => setAudioError(null), 5000);
+    }
+  };
 
   // Check existing session on mount, then load missions
   useEffect(() => {
@@ -564,13 +584,16 @@ export function AdminDashboard() {
                             )}
                           </td>
                           <td className="py-3.5 px-4">
+                            {audioError && (
+                              <div className="text-red-600 text-xs font-bold mb-1">{audioError}</div>
+                            )}
                             {reg.has_audio_data === 1 || reg.has_audio_data === true ? (
-                              playingAudioId === reg.id ? (
+                              playingAudioId === reg.id && audioUrl ? (
                               <div className="flex items-center gap-2">
                                 <audio
                                   autoPlay
                                   controls
-                                  src={getAudioPlaybackUrl(reg.id)}
+                                  src={audioUrl}
                                   className="h-8 w-48"
                                   onEnded={() => setPlayingAudioId(null)}
                                 />
@@ -583,11 +606,11 @@ export function AdminDashboard() {
                               </div>
                             ) : (
                               <button
-                                onClick={() => setPlayingAudioId(reg.id)}
+                                onClick={() => handlePlayAudio(reg.id)}
                                 className="inline-flex items-center gap-1 text-slate-700 hover:text-red-600 bg-slate-100 hover:bg-red-50 px-2.5 py-1 rounded-lg transition font-bold"
                               >
                                 <span>▶</span>
-                                <span>استماع</span>
+                                <span>{playingAudioId === reg.id ? 'جاري التحميل…' : 'استماع'}</span>
                               </button>
                             )
                             ) : (
