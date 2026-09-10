@@ -11,9 +11,13 @@ import { telegramRoutes } from './routes/telegram';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Enable CORS for development
+// Enable CORS
 app.use('*', cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:3000',
+    'https://red-crescent-minya.pages.dev',
+  ],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   credentials: true,

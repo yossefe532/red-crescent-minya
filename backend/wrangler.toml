@@ -12,19 +12,19 @@ port = 8787
 [[d1_databases]]
 binding = "DB"
 database_name = "red-crescent-minya"
-database_id = "local-d1"
+database_id = "3ef5df17-01db-4f33-b331-ed498116da81"
 
-# R2 Bucket binding
-[[r2_buckets]]
-binding = "AUDIO_BUCKET"
-bucket_name = "red-crescent-minya-audio"
+# R2 Bucket binding (enable R2 in Cloudflare Dashboard first)
+# [[r2_buckets]]
+# binding = "AUDIO_BUCKET"
+# bucket_name = "red-crescent-minya-audio"
 
 # Environment variables (secrets via wrangler secret put)
 [vars]
 ENVIRONMENT = "development"
 FRONTEND_URL = "http://localhost:5173"
 AUDIO_RETENTION_DAYS = "90"
-TELEGRAM_BOT_TOKEN = ""
+# TELEGRAM_BOT_TOKEN is set via .dev.vars (local) and Cloudflare Secrets (production)
 
 # Production environment
 [env.production]
@@ -32,3 +32,9 @@ TELEGRAM_BOT_TOKEN = ""
 ENVIRONMENT = "production"
 FRONTEND_URL = "https://red-crescent-minya.pages.dev"
 AUDIO_RETENTION_DAYS = "90"
+# TELEGRAM_BOT_TOKEN set via Cloudflare Secrets
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "red-crescent-minya"
+database_id = "3ef5df17-01db-4f33-b331-ed498116da81"
