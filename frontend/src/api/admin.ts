@@ -20,7 +20,7 @@ function clearToken(): void {
   } catch {}
 }
 
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Mission, updateMission, toggleMissionRegistration, updateMissionDetails } from '../api/admin';
+import { Mission, updateMission, toggleMissionRegistration, updateMissionDetails, authHeaders } from '../api/admin';
 
 interface Props {
   mission: Mission;
@@ -145,7 +145,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
     try {
       await fetch(`/api/admin/missions/${localMission.id}/close`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
       });
     } catch (err: any) {
       // Rollback on error

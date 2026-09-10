@@ -362,7 +362,8 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
     const registrations = await c.env.DB.prepare(
       `SELECT r.id, r.status, r.seat_number, r.waitlist_position, r.registration_sequence,
               r.created_at, r.confirmed_at, r.cancelled_at,
-              v.member_id, v.name, v.phone
+              v.member_id, v.name as volunteer_name, v.phone,
+              null as audio_id, null as phrase, null as duration_ms
        FROM registrations r
        JOIN volunteers v ON v.id = r.volunteer_id
        WHERE r.mission_id = ?
@@ -374,7 +375,8 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
     // Also get temporary registrations
     const tempRegs = await c.env.DB.prepare(
       `SELECT id, status, seat_number, waitlist_position, registration_sequence,
-              created_at, confirmed_at, cancelled_at, name, phone, 'TEMP' as member_id
+              created_at, confirmed_at, cancelled_at, name as volunteer_name, phone,
+              'TEMP' as member_id, null as audio_id, null as phrase, null as duration_ms
        FROM temporary_registrations
        WHERE mission_id = ?
        ORDER BY registration_sequence ASC`
@@ -387,6 +389,10 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
       ...(tempRegs.results || []),
     ].sort((a: any, b: any) => a.registration_sequence - b.registration_sequence);
 
+    const confirmed = allRegs.filter((r: any) => r.status === 'CONFIRMED').length;
+    const waitlist = allRegs.filter((r: any) => r.status === 'WAITLIST').length;
+    const cancelled = allRegs.filter((r: any) => r.status === 'CANCELLED').length;
+
     return success(c, {
       mission: {
         id: mission.id,
@@ -396,6 +402,9 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
       },
       registrations: allRegs,
       total: allRegs.length,
+      confirmed,
+      waitlist,
+      cancelled,
     });
   } catch (err: any) {
     console.error('Get registrations error:', err);
@@ -500,7 +509,7 @@ adminRoutes.get('/missions/:id/export', adminAuth, async (c) => {
 
     const registrations = await c.env.DB.prepare(
       `SELECT r.id, r.status, r.seat_number, r.waitlist_position, r.registration_sequence,
-              r.created_at, v.member_id, v.name, v.phone
+              r.created_at, v.member_id, v.name as volunteer_name, v.phone
        FROM registrations r
        JOIN volunteers v ON v.id = r.volunteer_id
        WHERE r.mission_id = ?
@@ -511,7 +520,7 @@ adminRoutes.get('/missions/:id/export', adminAuth, async (c) => {
 
     const tempRegs = await c.env.DB.prepare(
       `SELECT id, status, seat_number, waitlist_position, registration_sequence,
-              created_at, 'مؤقت' as member_id, name, phone
+              created_at, 'مؤقت' as member_id, name as volunteer_name, phone
        FROM temporary_registrations
        WHERE mission_id = ?
        ORDER BY registration_sequence ASC`
@@ -540,7 +549,7 @@ adminRoutes.get('/missions/:id/export', adminAuth, async (c) => {
         const seatDisplay = r.seat_number || '-';
         const waitlistDisplay = r.waitlist_position || '-';
         const date = new Date(r.created_at).toLocaleString('ar-EG');
-        return `${idx + 1},"${r.member_id}","${r.name}","${r.phone}","${statusAr}","${seatDisplay}","${waitlistDisplay}","${date}"`;
+        return `${idx + 1},"${r.member_id}","${r.volunteer_name}","${r.phone}","${statusAr}","${seatDisplay}","${waitlistDisplay}","${date}"`;
       })
       .join('\n');
 
