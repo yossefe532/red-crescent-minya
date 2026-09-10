@@ -363,7 +363,9 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
       `SELECT r.id, r.status, r.seat_number, r.waitlist_position, r.registration_sequence,
               r.created_at, r.confirmed_at, r.cancelled_at,
               v.member_id, v.name as volunteer_name, v.phone,
-              ac.id as audio_id, ac.phrase, ac.duration_ms, ac.mime_type
+              ac.id as audio_id, ac.phrase, ac.duration_ms, ac.mime_type,
+              CASE WHEN ac.audio_data IS NOT NULL AND length(ac.audio_data) > 100 
+                   THEN 1 ELSE 0 END as has_audio_data
        FROM registrations r
        JOIN volunteers v ON v.id = r.volunteer_id
        LEFT JOIN audio_confirmations ac ON ac.registration_id = r.id

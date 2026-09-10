@@ -85,6 +85,7 @@ export interface Registration {
   audio_id: string | null;
   phrase: string | null;
   duration_ms: number | null;
+  has_audio_data: number | boolean;
 }
 
 // ------- Auth API -------

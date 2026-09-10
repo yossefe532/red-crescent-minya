@@ -564,7 +564,7 @@ export function AdminDashboard() {
                             )}
                           </td>
                           <td className="py-3.5 px-4">
-                            {reg.audio_id ? (
+                            {reg.has_audio_data === 1 || reg.has_audio_data === true ? (
                               playingAudioId === reg.id ? (
                               <div className="flex items-center gap-2">
                                 <audio
