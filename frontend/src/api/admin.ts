@@ -167,7 +167,18 @@ export async function createMission(payload: MissionCreateData): Promise<Mission
   if (!res.ok || !data.success) {
     throw new Error(data.error?.message || 'فشل إنشاء المهمة');
   }
-  return data.data;
+  const m = data.data;
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://red-crescent-minya.pages.dev';
+  const publicUrl = `${origin}/m/${m.public_code}`;
+  const whatsappMessage = `🫀 جمعية الهلال الأحمر المصري - فرع المنيا\n\n✅ تم إنشاء مهمة تطوعية جديدة!\n\n📋 كود المهمة: ${m.public_code}\n📝 اسم المهمة: ${m.title}\n💬 عبارة التأكيد: ${m.confirmation_phrase}\n\n🔗 لتسجيل اسمك:\n${publicUrl}`;
+  return {
+    id: m.id,
+    public_code: m.public_code,
+    title: m.title,
+    confirmation_phrase: m.confirmation_phrase,
+    public_url: publicUrl,
+    whatsapp_message: whatsappMessage,
+  };
 }
 
 export async function updateMission(id: string, payload: Partial<Mission>): Promise<Mission> {
