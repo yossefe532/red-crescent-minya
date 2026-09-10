@@ -158,6 +158,33 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
     }
   };
 
+  // Handle delete mission permanently
+  const handleDeleteMission = async () => {
+    if (!confirm('⚠️ هل أنت متأكد من حذف المهمة نهائياً؟ سيتم حذف جميع التسجيلات والبيانات المرتبطة بها. هذا الإجراء لا يمكن التراجع عنه!')) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const res = await fetch(`/api/admin/missions/${localMission.id}`, {
+        method: 'DELETE',
+        headers: { ...authHeaders() },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || 'فشل حذف المهمة');
+      }
+      // Close panel and notify parent to refresh
+      onClose();
+      onUpdate();
+    } catch (err: any) {
+      setSaveError(err.message || 'فشل حذف المهمة');
+      setTimeout(() => setSaveError(null), 4000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
       <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden border-2 border-slate-200">
@@ -423,6 +450,26 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
                 >
                   {localMission.status === 'CLOSED' ? '✓ المهمة مغلقة بالفعل' : '🚫 إغلاق المهمة نهائياً'}
                   </button>
+                  </div>
+
+                  <div className="bg-red-50 border border-red-200 rounded-2xl p-5">
+                    <div className="flex items-start gap-3 mb-3">
+                      <span className="text-2xl">🗑️</span>
+                      <div>
+                        <h3 className="text-sm font-black text-red-900 mb-1">حذف المهمة نهائياً</h3>
+                        <p className="text-xs text-red-800 leading-relaxed">
+                          حذف المهمة بشكل كامل مع جميع التسجيلات والبيانات المرتبطة بها.
+                          هذا الإجراء لا يمكن التراجع عنه.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleDeleteMission}
+                      disabled={isSaving}
+                      className="w-full bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white font-bold py-3 px-6 rounded-xl transition shadow-md"
+                    >
+                      🗑️ حذف المهمة نهائياً
+                    </button>
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">

@@ -415,7 +415,92 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
   }
 });
 
-// POST /api/admin/missions/:id/cancel/:regId - Cancel a specific registration
+// POST /api/admin/registrations/:regId/cancel - Cancel a registration (frontend calls this)
+adminRoutes.post('/registrations/:regId/cancel', adminAuth, async (c) => {
+  try {
+    const regId = c.req.param('regId') as string;
+
+    // Look up registration to get mission_id
+    const reg = await c.env.DB.prepare(
+      `SELECT id, mission_id, status, seat_number FROM registrations WHERE id = ?`
+    ).bind(regId).first();
+
+    if (!reg) {
+      return Errors.notFound(c, 'Registration');
+    }
+    const regData = reg as any;
+
+    if (regData.status === 'CANCELLED') {
+      return Errors.conflict(c, 'التسجيل ملغي بالفعل');
+    }
+
+    const missionId = regData.mission_id;
+
+    // Cancel the registration
+    await c.env.DB.prepare(
+      `UPDATE registrations 
+       SET status = 'CANCELLED', cancelled_at = datetime('now')
+       WHERE id = ?`
+    ).bind(regId).run();
+
+    // If it was a confirmed seat, promote first waitlist volunteer
+    let promotedVolunteer = null;
+    if (regData.status === 'CONFIRMED' && regData.seat_number) {
+      const firstWaitlist = await c.env.DB.prepare(
+        `SELECT r.id, r.waitlist_position, v.name as volunteer_name, v.member_id FROM registrations r
+         JOIN volunteers v ON v.id = r.volunteer_id
+         WHERE r.mission_id = ? AND r.status = 'WAITLIST'
+         ORDER BY r.waitlist_position ASC
+         LIMIT 1`
+      ).bind(missionId).first();
+
+      if (firstWaitlist) {
+        const wlData = firstWaitlist as any;
+        await c.env.DB.prepare(
+          `UPDATE registrations 
+           SET status = 'CONFIRMED', seat_number = ?, waitlist_position = NULL, confirmed_at = datetime('now')
+           WHERE id = ?`
+        ).bind(regData.seat_number, wlData.id).run();
+
+        // Reorder remaining waitlist
+        await c.env.DB.prepare(
+          `UPDATE registrations 
+           SET waitlist_position = waitlist_position - 1
+           WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?`
+        ).bind(missionId, wlData.waitlist_position).run();
+
+        promotedVolunteer = {
+          name: wlData.volunteer_name,
+          member_id: wlData.member_id,
+          new_seat_number: regData.seat_number,
+        };
+      }
+    }
+
+    const adminId = getAdminId(c);
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'REGISTRATION_CANCELLED',
+      entityType: 'registration',
+      entityId: regId,
+      metadata: { missionId, seatNumber: regData.seat_number },
+    });
+
+    return success(c, {
+      cancelled_registration_id: regId,
+      promoted_volunteer: promotedVolunteer,
+      message: promotedVolunteer 
+        ? `تم إلغاء التسجيل وترقية ${promotedVolunteer.name} للقائمة المؤكدة`
+        : 'تم إلغاء التسجيل بنجاح',
+    });
+  } catch (err: any) {
+    console.error('Cancel registration error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// POST /api/admin/missions/:id/cancel/:regId - Cancel a specific registration (with mission in URL)
 adminRoutes.post('/missions/:id/cancel/:regId', adminAuth, async (c) => {
   try {
     const missionId = c.req.param('id') as string;
