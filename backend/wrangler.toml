@@ -24,6 +24,7 @@ bucket_name = "red-crescent-minya-audio"
 ENVIRONMENT = "development"
 FRONTEND_URL = "http://localhost:5173"
 AUDIO_RETENTION_DAYS = "90"
+TELEGRAM_BOT_TOKEN = ""
 
 # Production environment
 [env.production]

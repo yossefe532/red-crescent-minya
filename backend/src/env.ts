@@ -6,6 +6,8 @@ export interface Env {
   AUDIO_RETENTION_DAYS: string;
   ADMIN_AUTH_SECRET?: string;
   TURNSTILE_SECRET?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  ADMIN_CHAT_ID?: string;
 }
 
 export type AppEnv = {

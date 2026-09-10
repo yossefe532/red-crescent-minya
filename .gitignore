@@ -7,3 +7,5 @@ dist/
 .env.local
 *.mp3
 *.webm
+.dev.vars
+.env

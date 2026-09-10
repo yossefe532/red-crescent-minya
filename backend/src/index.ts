@@ -7,6 +7,7 @@ import { publicRoutes } from './routes/public';
 import { adminRoutes } from './routes/admin';
 import { publicRegistrationRoutes } from './routes/registration';
 import { quickRoutes } from './routes/quick';
+import { telegramRoutes } from './routes/telegram';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -43,6 +44,9 @@ app.route('/api', quickRoutes);
 
 // Admin routes (with authentication)
 app.route('/api/admin', adminRoutes);
+
+// Telegram bot webhook (receives POST from Telegram servers)
+app.route('/telegram', telegramRoutes);
 
 // 404 handler
 app.notFound((c) => {
