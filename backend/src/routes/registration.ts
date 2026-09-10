@@ -255,7 +255,8 @@ publicRegistrationRoutes.post('/register', async (c) => {
     const audioKey = generateAudioKey(missionData.public_code, registrationId);
     const usedPhrase = phrase || missionData.confirmation_phrase || `أؤكد مشاركتي في مهمة ${missionData.public_code}`;
 
-    // 8. Store audio in R2
+    // 8. Store audio (R2 primary, D1 blob fallback)
+    let audioStoredInR2 = false;
     try {
       await c.env.AUDIO_BUCKET.put(audioKey, audioBuffer, {
         httpMetadata: {
@@ -267,9 +268,9 @@ publicRegistrationRoutes.post('/register', async (c) => {
           mission_code: missionData.public_code,
         }
       });
+      audioStoredInR2 = true;
     } catch (storageErr) {
-      console.error('R2 Audio upload failed:', storageErr);
-      // If R2 fails in local simulation without R2 bindings, continue or log error
+      console.error('R2 Audio upload failed, falling back to D1 blob:', storageErr);
     }
 
     // 9. Save registration in DB
@@ -294,11 +295,21 @@ publicRegistrationRoutes.post('/register', async (c) => {
     // 10. Save audio confirmation record
     const audioId = generateUUID();
     const estDurationMs = durationMs || Math.max(2000, Math.floor(audioBuffer.byteLength / 8));
+    // D1 does NOT support raw BLOB binds (turns them into CSV text), so store base64 text
+    let audioB64: string | null = null;
+    if (!audioStoredInR2 && audioBuffer) {
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < audioBuffer.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, Array.from(audioBuffer.subarray(i, i + chunk)));
+      }
+      audioB64 = btoa(binary);
+    }
     await c.env.DB.prepare(
       `INSERT INTO audio_confirmations (
-        id, registration_id, phrase, audio_key, duration_ms, mime_type, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).bind(audioId, registrationId, usedPhrase, audioKey, estDurationMs, mimeType).run();
+        id, registration_id, phrase, audio_key, duration_ms, mime_type, audio_data, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).bind(audioId, registrationId, usedPhrase, audioKey, estDurationMs, mimeType, audioB64).run();
 
     // 11. Audit log
     await logAudit(c.env.DB, {

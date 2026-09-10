@@ -564,7 +564,8 @@ export function AdminDashboard() {
                             )}
                           </td>
                           <td className="py-3.5 px-4">
-                            {playingAudioId === reg.id ? (
+                            {reg.audio_id ? (
+                              playingAudioId === reg.id ? (
                               <div className="flex items-center gap-2">
                                 <audio
                                   autoPlay
@@ -588,6 +589,9 @@ export function AdminDashboard() {
                                 <span>▶</span>
                                 <span>استماع</span>
                               </button>
+                            )
+                            ) : (
+                              <span className="text-slate-300 text-xs">-</span>
                             )}
                           </td>
                           <td className="py-3.5 px-4 text-slate-500 text-[11px]">

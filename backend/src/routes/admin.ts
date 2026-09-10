@@ -363,9 +363,10 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
       `SELECT r.id, r.status, r.seat_number, r.waitlist_position, r.registration_sequence,
               r.created_at, r.confirmed_at, r.cancelled_at,
               v.member_id, v.name as volunteer_name, v.phone,
-              null as audio_id, null as phrase, null as duration_ms
+              ac.id as audio_id, ac.phrase, ac.duration_ms, ac.mime_type
        FROM registrations r
        JOIN volunteers v ON v.id = r.volunteer_id
+       LEFT JOIN audio_confirmations ac ON ac.registration_id = r.id
        WHERE r.mission_id = ?
        ORDER BY r.registration_sequence ASC`
     )
@@ -561,6 +562,61 @@ adminRoutes.get('/missions/:id/export', adminAuth, async (c) => {
     });
   } catch (err: any) {
     console.error('Export registrations error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// GET /api/admin/registrations/:regId/audio - Get audio recording for a registration
+adminRoutes.get('/registrations/:regId/audio', adminAuth, async (c) => {
+  try {
+    const regId = c.req.param('regId') as string;
+
+    const audioRec = await c.env.DB.prepare(
+      `SELECT audio_key, mime_type, audio_data FROM audio_confirmations WHERE registration_id = ?`
+    ).bind(regId).first();
+
+    if (!audioRec) {
+      return Errors.notFound(c, 'Audio recording');
+    }
+
+    let body: ReadableStream | ArrayBuffer | null = null;
+
+    // Try R2 first
+    try {
+      const r2Object = await c.env.AUDIO_BUCKET.get((audioRec as any).audio_key);
+      if (r2Object) {
+        body = r2Object.body;
+      }
+    } catch (_r2Err) {
+      // R2 unavailable or binding missing — fall back to D1 blob
+    }
+
+    // Fall back to D1 blob (stored as base64 text — D1 can't hold raw BLOBs)
+    if (body === null && (audioRec as any).audio_data) {
+      const b64 = (audioRec as any).audio_data as string;
+      try {
+        const binaryStr = atob(b64.trim());
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        body = bytes.buffer as ArrayBuffer;
+      } catch (_b64Err) {
+        console.error('Audio base64 decode failed:', _b64Err);
+      }
+    }
+
+    if (body === null) {
+      return Errors.notFound(c, 'Audio file');
+    }
+
+    const headers = new Headers();
+    headers.set('Content-Type', (audioRec as any).mime_type || 'audio/webm');
+    headers.set('Cache-Control', 'public, max-age=3600');
+
+    return new Response(body as BodyInit, { headers });
+  } catch (err: any) {
+    console.error('Get audio error:', err);
     return Errors.internal(c);
   }
 });
