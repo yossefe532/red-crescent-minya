@@ -19,6 +19,10 @@ database_id = "3ef5df17-01db-4f33-b331-ed498116da81"
 # binding = "AUDIO_BUCKET"
 # bucket_name = "red-crescent-minya-audio"
 
+# Workers AI binding for the smart Telegram bot (NLU for colloquial Arabic)
+[ai]
+binding = "AI"
+
 # Environment variables (secrets via wrangler secret put)
 [vars]
 ENVIRONMENT = "development"
@@ -33,6 +37,9 @@ ENVIRONMENT = "production"
 FRONTEND_URL = "https://red-crescent-minya.pages.dev"
 AUDIO_RETENTION_DAYS = "90"
 # TELEGRAM_BOT_TOKEN set via Cloudflare Secrets
+
+[env.production.ai]
+binding = "AI"
 
 [[env.production.d1_databases]]
 binding = "DB"

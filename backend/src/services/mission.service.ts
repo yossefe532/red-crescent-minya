@@ -10,6 +10,8 @@ export interface Mission {
   start_at: string;
   end_at: string;
   capacity: number;
+  waiting_list: number;
+  telegram_notifications: number;
   status: 'DRAFT' | 'OPEN' | 'CLOSED' | 'CANCELLED' | 'COMPLETED';
   confirmation_phrase: string;
   registration_open_at: string;
@@ -26,6 +28,8 @@ export interface MissionCreateData {
   start_at: string;
   end_at: string;
   capacity: number;
+  waiting_list?: number;
+  telegram_notifications?: number;
 }
 
 export interface MissionListOptions {
@@ -45,14 +49,18 @@ export async function createMission(db: D1Database, data: Record<string, unknown
   // Registration window defaults to open immediately and close at end of mission
   const registrationOpenAt = (data as any).registration_open_at ?? now;
   const registrationCloseAt = (data as any).registration_close_at ?? data.end_at;
+  
+  // Default waiting_list = 0, telegram_notifications = 1
+  const waitingList = (data as any).waiting_list ?? 0;
+  const telegramNotifications = (data as any).telegram_notifications ?? 1;
 
   try {
     const result = await db.prepare(`
       INSERT INTO missions (
         id, public_code, title, description, location, start_at, end_at, capacity,
-        status, confirmation_phrase, registration_open_at, registration_close_at,
+        waiting_list, telegram_notifications, status, confirmation_phrase, registration_open_at, registration_close_at,
         created_at, updated_at, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id,
       publicCode,
@@ -62,6 +70,8 @@ export async function createMission(db: D1Database, data: Record<string, unknown
       data.start_at,
       data.end_at,
       data.capacity,
+      waitingList,
+      telegramNotifications,
       'OPEN',
       confirmationPhrase,
       registrationOpenAt,
@@ -177,13 +187,41 @@ export async function getMissionAvailability(db: D1Database, missionId: string) 
     SELECT 
       COUNT(CASE WHEN status = 'CONFIRMED' THEN 1 END) as confirmed,
       COUNT(CASE WHEN status = 'WAITLIST' THEN 1 END) as waitlist,
-      (SELECT capacity FROM missions WHERE id = ?) as capacity
-  `).bind(missionId).first();
+      (SELECT capacity FROM missions WHERE id = ?) as capacity,
+      (SELECT waiting_list FROM missions WHERE id = ?) as waiting_list,
+      (SELECT telegram_notifications FROM missions WHERE id = ?) as telegram_notifications,
+      (SELECT status FROM missions WHERE id = ?) as status
+  `).bind(missionId, missionId, missionId, missionId).first();
+
+  const capacity = (result as any)?.capacity || 0;
+  const confirmed = (result as any)?.confirmed || 0;
+  const waitlist = (result as any)?.waitlist || 0;
+  const waitingList = (result as any)?.waiting_list || 0;
+  const telegramNotifications = (result as any)?.telegram_notifications || 1;
+  const status = (result as any)?.status || 'DRAFT';
+  
+  const available = capacity - confirmed;
+  const waitlistAvailable = waitingList - waitlist;
+  
+  // Auto-close logic: if capacity reached and no waiting list, close the mission
+  let shouldAutoClose = false;
+  if (available <= 0 && waitingList === 0 && status === 'OPEN') {
+    shouldAutoClose = true;
+  }
+  // If waiting list exists but it's also full, close the mission
+  if (available <= 0 && waitlistAvailable <= 0 && waitingList > 0 && status === 'OPEN') {
+    shouldAutoClose = true;
+  }
 
   return {
-    confirmed: (result as any)?.confirmed || 0,
-    waitlist: (result as any)?.waitlist || 0,
-    capacity: (result as any)?.capacity || 0,
-    available: ((result as any)?.capacity || 0) - ((result as any)?.confirmed || 0),
+    confirmed,
+    waitlist,
+    capacity,
+    waiting_list: waitingList,
+    telegram_notifications: telegramNotifications,
+    status,
+    available: Math.max(0, available),
+    waitlist_available: Math.max(0, waitlistAvailable),
+    should_auto_close: shouldAutoClose,
   };
 }

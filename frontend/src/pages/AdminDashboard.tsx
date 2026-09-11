@@ -32,16 +32,18 @@ export function AdminDashboard() {
   const [loadingMissions, setLoadingMissions] = useState(false);
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
 
-  // Create mission modal
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [newLocation, setNewLocation] = useState('مقر الهلال الأحمر بالمنيا');
-  const [newCapacity, setNewCapacity] = useState(10);
-  const [newStartDate, setNewStartDate] = useState('');
-  const [newEndDate, setNewEndDate] = useState('');
-  const [creatingMission, setCreatingMission] = useState(false);
-  const [createModalSuccess, setCreateModalSuccess] = useState<MissionCreateResponse | null>(null);
+  // Create mission modal state
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [newTitle, setNewTitle] = useState('');
+    const [newDescription, setNewDescription] = useState('');
+    const [newLocation, setNewLocation] = useState('مقر الهلال الأحمر بالمنيا');
+    const [newCapacity, setNewCapacity] = useState(10);
+    const [newWaitingList, setNewWaitingList] = useState(0);
+    const [newTelegramNotifications, setNewTelegramNotifications] = useState(true);
+    const [newStartDate, setNewStartDate] = useState('');
+    const [newEndDate, setNewEndDate] = useState('');
+    const [creatingMission, setCreatingMission] = useState(false);
+    const [createModalSuccess, setCreateModalSuccess] = useState<MissionCreateResponse | null>(null);
 
   // Registrations table state
   const [registrations, setRegistrations] = useState<Registration[]>([]);
@@ -134,6 +136,11 @@ export function AdminDashboard() {
   useEffect(() => {
     if (selectedMission) {
       loadRegistrations(selectedMission.id);
+      // Auto-refresh registrations every 15s so new voice recordings appear quickly
+      const interval = setInterval(() => {
+        loadRegistrations(selectedMission.id);
+      }, 15000);
+      return () => clearInterval(interval);
     }
   }, [selectedMission, filterStatus, searchQuery]);
 
@@ -177,6 +184,8 @@ export function AdminDashboard() {
         start_at: startIso,
         end_at: endIso,
         capacity: Number(newCapacity),
+        waiting_list: Number(newWaitingList || 0),
+        telegram_notifications: newTelegramNotifications,
       });
 
       setCreateModalSuccess(created);
@@ -724,6 +733,32 @@ export function AdminDashboard() {
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold focus:outline-none focus:ring-2 focus:ring-red-500"
                       required
                     />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">قائمة الانتظار (اختياري)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1000"
+                      value={newWaitingList}
+                      onChange={(e) => setNewWaitingList(parseInt(e.target.value, 10) || 0)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">0 = لا يوجد قائمة انتظار</p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="telegramNotifications"
+                      checked={newTelegramNotifications}
+                      onChange={(e) => setNewTelegramNotifications(e.target.checked)}
+                      className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500"
+                    />
+                    <label htmlFor="telegramNotifications" className="font-bold text-slate-700 cursor-pointer">
+                      تفعيل إشعارات تيليجرام عند التسجيل
+                    </label>
                   </div>
 
                   <div className="pt-2 flex gap-2">

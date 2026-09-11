@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { 
   getMission, 
   lookupQuickProfile, 
@@ -22,7 +22,6 @@ interface LiveVolunteer {
 
 export function MissionRegistration() {
   const { code } = useParams<{ code: string }>();
-  const navigate = useNavigate();
 
   const [mission, setMission] = useState<Mission | null>(null);
   const [loadingMission, setLoadingMission] = useState(true);
@@ -59,6 +58,7 @@ export function MissionRegistration() {
 
   // Success screen mode
   const [successMode, setSuccessMode] = useState<'result' | 'quick-save' | 'quick-save-success'>('result');
+  const [completed, setCompleted] = useState(false);
 
   // 1. Fetch Mission Info (with polling every 6s)
   const fetchMissionData = async (isInitial = false) => {
@@ -502,7 +502,7 @@ export function MissionRegistration() {
               </button>
 
               <button
-                onClick={() => navigate('/')}
+                onClick={() => setCompleted(true)}
                 className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 px-6 rounded-2xl transition shadow-md"
               >
                 تم
@@ -614,11 +614,32 @@ export function MissionRegistration() {
             </div>
 
             <button
-              onClick={() => navigate('/')}
+              onClick={() => setCompleted(true)}
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-2xl transition shadow-md"
             >
-              تم — العودة للصفحة الرئيسية
+              تم
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // COMPLETED / THANK YOU SCREEN
+  if (completed) {
+    return (
+      <div className="min-h-screen bg-slate-100 py-8 px-4 flex items-center justify-center">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-md w-full border border-slate-200 animate-fadeIn text-center">
+          <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl">
+            🙏
+          </div>
+          <h2 className="text-2xl font-extrabold text-slate-900 mb-2">شكراً لتسجيلك</h2>
+          <p className="text-sm text-slate-600 mb-4 leading-relaxed">
+            تم تسجيلك بنجاح في المهمة.<br />
+            يمكنك إغلاق هذه الصفحة الآن.
+          </p>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-800 text-right">
+            <p>💡 يمكنك إغلاق التبويب أو العودة للصفحة السابقة.</p>
           </div>
         </div>
       </div>

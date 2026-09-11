@@ -45,6 +45,8 @@ export interface Mission {
   start_at: string;
   end_at: string;
   capacity: number;
+  waiting_list: number;
+  telegram_notifications: boolean | number;
   confirmation_phrase: string;
   status: 'DRAFT' | 'OPEN' | 'CLOSED' | 'CANCELLED' | 'COMPLETED';
   registration_open_at: string | null;
@@ -59,6 +61,8 @@ export interface MissionCreateData {
   start_at: string;
   end_at: string;
   capacity: number;
+  waiting_list?: number;
+  telegram_notifications?: boolean;
 }
 
 export interface MissionCreateResponse {
@@ -159,10 +163,14 @@ export async function getMission(id: string): Promise<Mission & { confirmed: num
 }
 
 export async function createMission(payload: MissionCreateData): Promise<MissionCreateResponse> {
+  const body = {
+    ...payload,
+    telegram_notifications: payload.telegram_notifications ? 1 : 0,
+  };
   const res = await fetch('/api/admin/missions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   const data = await res.json();
   if (!res.ok || !data.success) {

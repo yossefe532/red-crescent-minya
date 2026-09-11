@@ -7,7 +7,8 @@ export interface Env {
   ADMIN_AUTH_SECRET?: string;
   TURNSTILE_SECRET?: string;
   TELEGRAM_BOT_TOKEN?: string;
-  ADMIN_CHAT_ID?: string;
+  ADMIN_CHAT_IDS?: string;
+  AI_API_KEY?: string;       // Cloudflare Workers AI API key
 }
 
 export type AppEnv = {
