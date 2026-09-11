@@ -4,8 +4,8 @@
  * Uses Cloudflare Workers AI for NLU + grammY for Bot API.
  */
 import { Hono } from 'hono';
-import { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
+import { createMission } from '../services/mission.service';
 
 // ─── Type Declarations ─────────────────────────────────────────
 interface Env {
@@ -18,7 +18,7 @@ interface Env {
 
 // ─── Wizard Session State ──────────────────────────────────────
 type WizardState = 'idle'
-  | 'create_title' | 'create_location' | 'create_capacity' | 'create_confirm'
+  | 'create_title' | 'create_location' | 'create_capacity' | 'create_waitlist' | 'create_confirm'
   | 'delete_confirm'
   | 'toggle_confirm'
   | 'cancelreg_select_mission' | 'cancelreg_select_volunteer' | 'cancelreg_confirm'
@@ -27,8 +27,10 @@ type WizardState = 'idle'
 interface WizardData {
   title?: string;
   location?: string;
-  time?: string;
+  start_at?: string;
+  end_at?: string;
   capacity?: number;
+  waiting_list?: number;
   missionId?: string;
   missionCode?: string;
   volunteerId?: string;
@@ -108,19 +110,27 @@ async function clearSession(db: D1Database, chatId: number): Promise<void> {
 }
 
 // ─── Telegram API Helpers ──────────────────────────────────────
+function normalizeReplyMarkup(markup: unknown): unknown {
+  if (!markup || typeof markup !== 'object') return markup;
+  const m = markup as any;
+  if (typeof m.toJSON === 'function') return m.toJSON();
+  if (Array.isArray(m.inline_keyboard)) return { inline_keyboard: m.inline_keyboard };
+  if (typeof m.inline_keyboard === 'function') return { inline_keyboard: m.inline_keyboard() };
+  return markup;
+}
+
 async function tgSend(token: string, chatId: number, text: string, extra?: Record<string, unknown>): Promise<void> {
   const body: Record<string, unknown> = { chat_id: chatId, text, parse_mode: 'HTML', ...extra };
-  // Normalize grammy InlineKeyboard instances into plain JSON
-  if (body.reply_markup && typeof (body.reply_markup as any)?.inline_keyboard === 'function') {
-    body.reply_markup = { inline_keyboard: (body.reply_markup as any).inline_keyboard() };
-  } else if (body.reply_markup && typeof (body.reply_markup as any)?.toJSON === 'function') {
-    body.reply_markup = (body.reply_markup as any).toJSON();
-  }
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  if (body.reply_markup) body.reply_markup = normalizeReplyMarkup(body.reply_markup);
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }).catch(console.error);
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    console.error('tgSend failed', res.status, errText);
+  }
 }
 
 async function tgEdit(token: string, chatId: number, messageId: number, text: string, extra?: Record<string, unknown>): Promise<void> {
@@ -338,6 +348,12 @@ function parseWithRules(text: string): ParsedIntent {
 
 // ─── DB Query Helpers ──────────────────────────────────────────
 async function findMissionByHint(db: D1Database, hint: string): Promise<any | null> {
+  // Direct ID match (UUID from callback buttons)
+  const byId = await db.prepare(
+    'SELECT id, public_code, title, status FROM missions WHERE id = ?'
+  ).bind(hint).first();
+  if (byId) return byId;
+
   // Try exact code match first (MNY-XXX)
   const code = hint.match(/MNY-?(\d+)/i);
   if (code) {
@@ -480,15 +496,27 @@ async function executeCreateMission(token: string, chatId: number, db: D1Databas
   } while (attempts < 10);
   if (!code) code = `MNY-${Date.now() % 1000}`;
 
-  const capacity = data.capacity || 0;
-  await db.prepare(
-    `INSERT INTO missions (id, public_code, title, description, location, capacity, status, confirmation_phrase, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, datetime('now'), datetime('now'))`
-  ).bind(
-    crypto.randomUUID(), code, data.title || 'مهمة بدون عنوان',
-    '', data.location || 'غير محدد', capacity,
-    `${data.title} — ${data.location}`
-  ).run();
+  const capacity = data.capacity || 10; // Default 10 if empty (CHECK requires > 0)
+    const waitingList = data.waiting_list || 0;
+    const now = new Date().toISOString();
+    const endAt = new Date(Date.now() + 7 * 86400000).toISOString(); // 7 days from now
+    const confirmationPhrase = `أؤكد مشاركتي في مهمة ${code}`;
+
+    try {
+      await db.prepare(
+        `INSERT INTO missions (id, public_code, title, description, location, start_at, end_at, capacity, waiting_list, telegram_notifications, status, confirmation_phrase, registration_open_at, registration_close_at, created_at, updated_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        crypto.randomUUID(), code, data.title || 'مهمة بدون عنوان',
+        null, data.location || 'غير محدد', now, endAt,
+        capacity, waitingList, 1, confirmationPhrase,
+        now, endAt, now, now, 'telegram'
+      ).run();
+    } catch (err: any) {
+      console.error('executeCreateMission INSERT failed:', err);
+      await tgSend(token, chatId, `❌ فشل إنشاء المهمة: ${err.message || err}`);
+      return;
+    }
 
   await clearSession(db, chatId);
 
@@ -771,6 +799,16 @@ async function executeDelete(token: string, chatId: number, db: D1Database, miss
 }
 
 // ─── View Helpers ──────────────────────────────────────────────
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return 'غير معروف';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString('ar-EG', { timeZone: 'Africa/Cairo', hour12: true, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
+}
+
 async function showMissions(token: string, chatId: number, db: D1Database, filter?: string): Promise<void> {
   let sql = 'SELECT id, public_code, title, status, capacity FROM missions';
   if (filter === 'active') sql += " WHERE status = 'OPEN'";
@@ -888,15 +926,16 @@ async function showStats(token: string, chatId: number, db: D1Database, hint?: s
 }
 
 async function showRegistrants(token: string, chatId: number, db: D1Database, missionId: string): Promise<void> {
-  const mission = await db.prepare('SELECT id, public_code, title FROM missions WHERE id = ?').bind(missionId).first() as any;
+  const mission = await db.prepare('SELECT id, public_code, title, status FROM missions WHERE id = ?').bind(missionId).first() as any;
   if (!mission) { await tgSend(token, chatId, '❌ المهمة غير موجودة.'); return; }
 
   const rows = await db.prepare(
-    `SELECT r.status, r.waitlist_position, v.name, v.member_id
-     FROM registrations r JOIN volunteers v ON r.volunteer_id = v.id
-     WHERE r.mission_id = ? AND r.status != 'CANCELLED'
-     ORDER BY r.status, r.created_at`
-  ).bind(missionId).all();
+      `SELECT r.status, r.waitlist_position, r.created_at, r.id as reg_id, v.name, v.member_id, v.phone,
+              (SELECT COUNT(*) FROM audio_confirmations ac WHERE ac.registration_id = r.id) as has_audio
+       FROM registrations r JOIN volunteers v ON r.volunteer_id = v.id
+       WHERE r.mission_id = ? AND r.status != 'CANCELLED'
+       ORDER BY r.status, r.created_at`
+    ).bind(missionId).all();
 
   if (!rows.results?.length) {
     await tgSend(token, chatId, `📋 لا يوجد مسجلين في <b>${mission.title}</b>`);
@@ -909,21 +948,177 @@ async function showRegistrants(token: string, chatId: number, db: D1Database, mi
   const waitlist = rows.results.filter((r: any) => r.status === 'WAITLIST');
 
   if (confirmed.length) {
-    msg += `✅ <b>مؤكدون (${confirmed.length}):</b>\n`;
-    confirmed.forEach((r: any, i: number) => {
-      msg += `  ${i + 1}. ${r.name} — ${r.member_id}\n`;
+      msg += `✅ <b>مؤكدون (${confirmed.length}):</b>\n`;
+      confirmed.forEach((r: any, i: number) => {
+        const dt = formatDate(r.created_at);
+        const audioIcon = Number(r.has_audio) > 0 ? '🎙️' : '';
+        msg += `  ${i + 1}. ${r.name} (${r.member_id}) ${audioIcon}\n`;
+        msg += `     🕐 ${dt}\n`;
+      });
+      msg += '\n';
+    }
+    if (waitlist.length) {
+      msg += `⏳ <b>قائمة الانتظار (${waitlist.length}):</b>\n`;
+      waitlist.forEach((r: any) => {
+        const dt = formatDate(r.created_at);
+        const audioIcon = Number(r.has_audio) > 0 ? '🎙️' : '';
+        msg += `  #${r.waitlist_position || '?'} — ${r.name} (${r.member_id}) ${audioIcon}\n`;
+        msg += `     🕐 ${dt}\n`;
+      });
+    }
+
+    const kb = missionActionsKeyboard(mission.id, mission.public_code, mission.status);
+    // Instead of only keyboard, add per-volunteer action buttons
+    const volKb = new InlineKeyboard();
+    confirmed.forEach((r: any) => {
+      volKb.text(`👤 ${r.name}`, `vol:${r.reg_id}`).row();
     });
-    msg += '\n';
-  }
-  if (waitlist.length) {
-    msg += `⏳ <b>قائمة الانتظار (${waitlist.length}):</b>\n`;
     waitlist.forEach((r: any) => {
-      msg += `  #${r.waitlist_position || '?'} — ${r.name} — ${r.member_id}\n`;
+      volKb.text(`⏳ ${r.name}`, `vol:${r.reg_id}`).row();
     });
+    volKb.text('🔙 القائمة الرئيسية', 'menu:main');
+    await tgSend(token, chatId, msg, { reply_markup: volKb });
+}
+
+// ─── Volunteer Detail View ─────────────────────────────────────
+async function showVolunteerDetail(token: string, chatId: number, db: D1Database, regId: string): Promise<void> {
+  const reg = await db.prepare(
+    `SELECT r.id, r.status, r.waitlist_position, r.created_at,
+            v.name, v.member_id, v.phone,
+            m.id as mission_id, m.title, m.public_code
+     FROM registrations r
+     JOIN volunteers v ON r.volunteer_id = v.id
+     JOIN missions m ON r.mission_id = m.id
+     WHERE r.id = ?`
+  ).bind(regId).first() as any;
+
+  if (!reg) { await tgSend(token, chatId, '❌ التسجيل غير موجود.'); return; }
+
+  const dt = formatDate(reg.created_at);
+  const statusIcon = reg.status === 'CONFIRMED' ? '✅' : '⏳';
+  const statusText = reg.status === 'CONFIRMED' ? 'مؤكد' : 'قائمة انتظار';
+
+  // Check if has audio
+  const audioRow = await db.prepare(
+    'SELECT id FROM audio_confirmations WHERE registration_id = ?'
+  ).bind(regId).first();
+
+  await tgSend(token, chatId,
+    `👤 <b>تفاصيل المتطوع</b>\n━━━━━━━━━━━━━━━━━\n\n`
+    + `📝 <b>الاسم:</b> ${reg.name}\n`
+    + `🏷️ <b>رقم العضوية:</b> ${reg.member_id}\n`
+    + `📱 <b>التليفون:</b> ${reg.phone || 'غير مسجل'}\n`
+    + `📅 <b>وقت التسجيل:</b> ${dt}\n`
+    + `📋 <b>المهمة:</b> ${reg.title} (${reg.public_code})\n`
+    + `📊 <b>الحالة:</b> ${statusIcon} ${statusText}${reg.waitlist_position ? `\n⏳ <b>رقم القائمة:</b> #${reg.waitlist_position}` : ''}\n`
+    + (Number(audioRow?.id) > 0 ? `\n🎙️ <b>يوجد تسجيل صوتي</b>` : `\n🔇 <b>لا يوجد تسجيل صوتي</b>`)
+  );
+
+  // Action buttons
+  const kb = new InlineKeyboard();
+  if (Number(audioRow?.id) > 0) {
+    kb.text('🎙️ استمع للتسجيل', `volaudio:${regId}`);
+  }
+  if (reg.status === 'CONFIRMED') {
+    kb.text('⏳ تحويل للانتظار', `volmove:${regId}:waitlist`);
+  } else if (reg.status === 'WAITLIST') {
+    kb.text('✅ تأكيد التسجيل', `volmove:${regId}:confirm`);
+  }
+  kb.text('🚫 إلغاء التسجيل', `volcancel:${regId}`).row();
+  kb.text('📋 رجوع للمسجلين', `registrants:${reg.mission_id}`);
+  kb.text('🔙 القائمة الرئيسية', 'menu:main');
+  await tgSend(token, chatId, 'ااختار العمليات 👇', { reply_markup: kb });
+}
+
+// ─── Send Volunteer Audio ──────────────────────────────────────
+async function sendVolunteerAudio(token: string, chatId: number, db: D1Database, regId: string): Promise<void> {
+  const audioRow = await db.prepare(
+    `SELECT ac.audio_data, ac.duration_ms, ac.mime_type,
+            v.name, v.member_id, m.title, m.public_code
+     FROM audio_confirmations ac
+     JOIN registrations r ON ac.registration_id = r.id
+     JOIN volunteers v ON r.volunteer_id = v.id
+     JOIN missions m ON r.mission_id = m.id
+     WHERE ac.registration_id = ?`
+  ).bind(regId).first() as any;
+
+  if (!audioRow || !audioRow.audio_data) {
+    await tgSend(token, chatId, '❌ لا يوجد تسجيل صوتي محفوظ.');
+    return;
   }
 
-  const kb = missionActionsKeyboard(mission.id, mission.public_code, 'OPEN');
-  await tgSend(token, chatId, msg, { reply_markup: kb });
+  // Audio is stored as base64 in D1 — send it as a voice message
+    const mime = audioRow.mime_type || 'audio/webm';
+    const ext = mime.includes('webm') ? 'webm' : mime.includes('ogg') ? 'ogg' : 'mp3';
+    const durationSec = Math.round((audioRow.duration_ms || 0) / 1000);
+
+    // Decode base64 to binary in Workers (no Buffer available)
+    const b64 = audioRow.audio_data;
+    const binaryStr = atob(b64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+  // Send audio info first
+  await tgSend(token, chatId,
+    `🎙️ <b>تسجيل المتطوع</b>\n\n`
+    + `👤 <b>الاسم:</b> ${audioRow.name}\n`
+    + `🏷️ <b>العضوية:</b> ${audioRow.member_id}\n`
+    + `📋 <b>المهمة:</b> ${audioRow.title} (${audioRow.public_code})\n`
+    + `⏱️ <b>المدة:</b> ${durationSec} ثانية\n\n`
+    + `📥 جاري إرسال التسجيل الصوتي...`
+  );
+
+  // Send audio via Telegram API
+  try {
+    const formData = new FormData();
+        formData.append('chat_id', chatId.toString());
+        formData.append('voice', new Blob([bytes], { type: mime }), `recording_${regId}.${ext}`);
+        if (durationSec) formData.append('duration', durationSec.toString());
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendVoice`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.text().catch(() => '');
+      console.error('sendVoice failed:', res.status, err);
+      await tgSend(token, chatId, `❌ فشل إرسال الصوت. يمكنك الاستماع من الويب:\nhttps://red-crescent-minya.pages.dev/admin`);
+    }
+  } catch (err: any) {
+    console.error('sendVoice error:', err);
+    await tgSend(token, chatId, `❌ خطأ في الإرسال. جرب من الويب.`);
+  }
+}
+
+// ─── Move Volunteer Status (waitlist ↔ confirm) ────────────────
+async function moveVolunteerStatus(token: string, chatId: number, db: D1Database, regId: string, targetStatus: string): Promise<void> {
+  const reg = await db.prepare(
+    `SELECT r.id, r.status, v.name, m.title, m.public_code
+     FROM registrations r JOIN volunteers v ON r.volunteer_id = v.id JOIN missions m ON r.mission_id = m.id
+     WHERE r.id = ?`
+  ).bind(regId).first() as any;
+
+  if (!reg) { await tgSend(token, chatId, '❌ التسجيل غير موجود.'); return; }
+
+  if (reg.status === targetStatus) {
+    await tgSend(token, chatId, `ℹ️ المتطوع <b>${reg.name}</b> بالفعل في حالة ${targetStatus === 'CONFIRMED' ? 'مؤكد' : 'قائمة الانتظار'}.`);
+    return;
+  }
+
+  await db.prepare(
+    'UPDATE registrations SET status = ?, waitlist_position = ?, confirmed_at = datetime(\'now\') WHERE id = ?'
+  ).bind(targetStatus, targetStatus === 'WAITLIST' ? 1 : null, regId).run();
+
+  const label = targetStatus === 'CONFIRMED' ? '✅ تأكد' : '⏳ تحول للانتظار';
+  const kb = new InlineKeyboard()
+    .text('🔙 رجوع', `vol:${regId}`)
+    .text('👥 المسجلين', `registrants:${reg.mission_id}`);
+
+  await tgSend(token, chatId,
+    `${label} المتطوع <b>${reg.name}</b> في مهمة <b>${reg.title}</b> (${reg.public_code})`,
+    { reply_markup: kb }
+  );
 }
 
 async function showWaitlist(token: string, chatId: number, db: D1Database, missionId: string): Promise<void> {
@@ -1069,12 +1264,45 @@ async function handleCallbackQuery(token: string, chatId: number, db: D1Database
       return;
     }
 
-    // ─── Mission detail ───
-    case 'mission': {
-      await tgAnswerCb(token, cqId);
-      if (params[0]) await showMissionDetail(token, chatId, db, params[0]);
-      return;
-    }
+    // ─── Volunteer detail & actions ───
+        case 'vol': {
+          await tgAnswerCb(token, cqId);
+          if (params[0]) await showVolunteerDetail(token, chatId, db, params[0]);
+          return;
+        }
+
+        // ─── Volunteer audio listening ───
+        case 'volaudio': {
+          await tgAnswerCb(token, cqId);
+          if (params[0]) await sendVolunteerAudio(token, chatId, db, params[0]);
+          return;
+        }
+
+        // ─── Move volunteer to waitlist / confirm ───
+        case 'volmove': {
+          await tgAnswerCb(token, cqId);
+          if (params[0] && params[1]) {
+            const [regId, target] = params;
+            if (target === 'waitlist' || target === 'confirm') {
+              await moveVolunteerStatus(token, chatId, db, regId, target.toUpperCase());
+            }
+          }
+          return;
+        }
+
+        // ─── Volunteer cancel ───
+        case 'volcancel': {
+          await tgAnswerCb(token, cqId);
+          if (params[0]) await executeCancelRegistration(token, chatId, db, params[0]);
+          return;
+        }
+
+        // ─── Mission detail ───
+        case 'mission': {
+          await tgAnswerCb(token, cqId);
+          if (params[0]) await showMissionDetail(token, chatId, db, params[0]);
+          return;
+        }
 
     // ─── Toggle registration ───
     case 'toggle': {
@@ -1240,8 +1468,13 @@ telegramRoutes.post('/', async (c) => {
       await tgAnswerCb(token, cq.id, '⚠️ غير مصرح لك.');
       return c.json({ ok: true });
     }
-    await handleCallbackQuery(token, chatId, db, cq);
-    return c.json({ ok: true });
+    try {
+          await handleCallbackQuery(token, chatId, db, cq);
+        } catch (err: any) {
+          console.error('Callback query error:', err);
+          await tgAnswerCb(token, cq.id, '⚠️ حدث خطأ. حاول مرة تانية.');
+        }
+        return c.json({ ok: true });
   }
 
   // ─── Text Messages ─────────────────────────────────
