@@ -81,6 +81,44 @@ export function MissionRegistration() {
     return () => clearInterval(interval);
   }, [code]);
 
+  // 1b. FAST status polling (every 1s) with change detection — auto-close
+  const lastStatusRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!code) return;
+
+    const pollStatus = async () => {
+      try {
+        const res = await fetch(`/api/missions/${code}/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success) return;
+        const s = data.data;
+
+        const fingerprint = `${s.status}|${s.is_completely_full}|${s.confirmed}|${s.waitlist}|${s.registration_open}`;
+        
+        if (fingerprint !== lastStatusRef.current) {
+          lastStatusRef.current = fingerprint;
+          setMission((prev: any) => prev ? {
+            ...prev,
+            status: s.status,
+            confirmed: s.confirmed,
+            waitlist: s.waitlist,
+            is_full: s.is_full,
+            is_completely_full: s.is_completely_full,
+            registration_open: s.registration_open,
+          } : prev);
+        }
+      } catch {
+        // silently ignore
+      }
+    };
+
+    pollStatus();
+    const interval = setInterval(pollStatus, 1000);
+    return () => clearInterval(interval);
+  }, [code]);
+
   // 2. Live registrations polling every 3 seconds
   const fetchLiveRegistrations = async () => {
     if (!code) return;
@@ -343,11 +381,15 @@ export function MissionRegistration() {
           <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold">
             🔒
           </div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">لقد اكتملت هذه المهمة</h2>
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">
+            {mission.is_completely_full ? '🔒 لقد اكتملت هذه المهمة' : 'تم إغلاق التسجيل'}
+          </h2>
           <p className="text-slate-600 mb-4">
-            {mission.is_full 
-              ? 'تم استكمال العدد المطلوب من المتطوعين (بما في ذلك قائمة الانتظار).'
-              : 'تم إغلاق باب التسجيل لهذه المهمة.'}
+            {mission.is_completely_full 
+              ? `تم استكمال العدد المطلوب: ${mission.confirmed} مؤكّد${mission.waitlist ? ` + ${mission.waitlist} انتظار` : ''}`
+              : mission.is_full 
+                ? 'تم استكمال العدد الأساسي.'
+                : 'تم إغلاق باب التسجيل لهذه المهمة.'}
           </p>
           
           <div className="mt-6 pt-6 border-t border-slate-200">

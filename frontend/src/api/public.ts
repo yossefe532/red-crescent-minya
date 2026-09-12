@@ -16,7 +16,9 @@ export interface Mission {
   waitlist: number;
   available: number;
   is_full: boolean;
+  is_completely_full: boolean;
   registration_open: boolean;
+  waiting_list?: number;
 }
 
 export interface RegistrationResult {

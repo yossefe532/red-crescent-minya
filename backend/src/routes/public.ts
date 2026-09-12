@@ -32,7 +32,7 @@ publicRoutes.get('/missions/:publicCode', async (c) => {
     const result = await c.env.DB.prepare(`
       SELECT id, public_code, title, description, location, 
              start_at, end_at, capacity, confirmation_phrase, status,
-             registration_open_at, registration_close_at
+             registration_open_at, registration_close_at, waiting_list
       FROM missions 
       WHERE public_code = ?
     `).bind(publicCode).first();
@@ -78,6 +78,7 @@ publicRoutes.get('/missions/:publicCode', async (c) => {
       waitlist: waitlistCount,
       available: Math.max(0, mission.capacity - confirmedCount),
       is_full: confirmedCount >= mission.capacity,
+      is_completely_full: confirmedCount >= mission.capacity && (waitlistCount >= (mission.waiting_list || 0) || !mission.waiting_list),
       registration_open: isOpen,
     });
   } catch (err: any) {
@@ -124,6 +125,52 @@ publicRoutes.get('/missions/:publicCode/registrations-live', async (c) => {
     return success(c, registrations);
   } catch (err: any) {
     console.error('Live registrations error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// GET /api/missions/:publicCode/status — lightweight status-only endpoint for fast polling
+publicRoutes.get('/missions/:publicCode/status', async (c) => {
+  try {
+    const publicCode = c.req.param('publicCode');
+    
+    const mission = await c.env.DB.prepare(`
+      SELECT id, status, capacity, waiting_list, registration_close_at
+      FROM missions WHERE public_code = ?
+    `).bind(publicCode).first();
+
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
+    }
+
+    const m = mission as any;
+    const counts = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(CASE WHEN status = 'CONFIRMED' THEN 1 END) as confirmed,
+        COUNT(CASE WHEN status = 'WAITLIST' THEN 1 END) as waitlist
+      FROM registrations WHERE mission_id = ?
+    `).bind(m.id).first();
+
+    const cd = counts as any;
+    const confirmed = cd?.confirmed || 0;
+    const waitlist = cd?.waitlist || 0;
+    const isFull = confirmed >= m.capacity;
+    const isCompletelyFull = isFull && (waitlist >= (m.waiting_list || 0) || !m.waiting_list);
+    
+    const nowIso = new Date().toISOString();
+    const registrationClosed = m.registration_close_at ? nowIso >= m.registration_close_at : false;
+    const isOpen = m.status === 'OPEN' && !registrationClosed && !isCompletelyFull;
+
+    return success(c, {
+      status: m.status,
+      confirmed,
+      waitlist,
+      is_full: isFull,
+      is_completely_full: isCompletelyFull,
+      registration_open: isOpen,
+    });
+  } catch (err) {
+    console.error('Status check error:', err);
     return Errors.internal(c);
   }
 });

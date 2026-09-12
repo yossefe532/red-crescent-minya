@@ -96,35 +96,34 @@ async function sendCapacityNotifications(
     let text = '';
     let emoji = '';
 
-    // CASE 1: Core capacity just reached (this registration was the last CONFIRMED spot)
+    // CASE 1: Core capacity just reached
     if (newStatus === 'CONFIRMED' && confirmedCount >= capacity && waitingList > 0) {
       emoji = '⚠️';
-      text = `${emoji} *العدد الأساسي كتمل\\!*\n\n` +
-        `المهمة: ${mission.title} \\(` + mission.publicCode + `\\)\n` +
-        `العدد الأساسي: ${capacity} \\✅ مكتمل\n` +
-        `انتظار: ${waitingList} مقعد متاح\n\n` +
-        `تم فتح قائمة الانتظار\\. المتطوع الجديد هيبقى في الانتظار.`;
+      text = `${emoji} <b>العدد الأساسي كتمل!</b><br><br>`
+        + `المهمة: ${mission.title} (${mission.publicCode})<br>`
+        + `العدد الأساسي: ${capacity} ✅ مكتمل<br>`
+        + `انتظار: ${waitingList} مقعد متاح<br><br>`
+        + `تم فتح قائمة الانتظار. المتطوع الجديد هيبقى في الانتظار.`;
     }
     // CASE 2: Waitlist just filled
     else if (newStatus === 'WAITLIST' && waitlistCount >= waitingList) {
       emoji = '🔴';
-      text = `${emoji} *العدد كتمل بالكامل\\!*\n\n` +
-        `المهمة: ${mission.title} \\(` + mission.publicCode + `\\)\n` +
-        `العدد الأساسي: ${capacity} \\✅\n` +
-        `قائمة الانتظار: ${waitingList} \\✅ مكتملة\n\n` +
-        `⚠️ لا يوجد مقاعد متاحة\\. التسجيل nuevos هيترفض.`;
+      text = `${emoji} <b>العدد كتمل بالكامل!</b><br><br>`
+        + `المهمة: ${mission.title} (${mission.publicCode})<br>`
+        + `العدد الأساسي: ${capacity} ✅<br>`
+        + `قائمة الانتظار: ${waitingList} ✅ مكتملة<br><br>`
+        + `⚠️ لا يوجد مقاعد متاحة. التسجيل هيترفض.`;
     }
     // CASE 3: Mission fully complete (core + waitlist all filled)
-    else if (newStatus === 'WAITLIST' && waitlistCount >= waitingList && confirmedCount >= capacity) {
+    else if (confirmedCount >= capacity && (waitlistCount || 0) >= (waitingList || 0)) {
       emoji = '🏆';
-      text = `${emoji} *اكتملت المهمة بالكامل\\!*\n\n` +
-        `المهمة: ${mission.title} \\(` + mission.publicCode + `\\)\n` +
-        `العدد الأساسي: ${capacity}\\✅\n` +
-        `الانتظار: ${waitingList}\\✅\n` +
-        `الاجمالي: ${capacity + waitingList} متطوع\n\n` +
-        `📊 لعرض الاحصاءات: /missions`;
+      text = `${emoji} <b>اكتملت المهمة بالكامل!</b><br><br>`
+        + `المهمة: ${mission.title} (${mission.publicCode})<br>`
+        + `العدد الأساسي: ${capacity} ✅<br>`
+        + `الانتظار: ${waitingList} ✅<br>`
+        + `الاجمالي: ${capacity + waitingList} متطوع<br><br>`
+        + `📊 لعرض الاحصاءات: /missions`;
     }
-
     if (text) {
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
@@ -132,7 +131,7 @@ async function sendCapacityNotifications(
         body: JSON.stringify({
           chat_id: chatId,
           text,
-          parse_mode: 'MarkdownV2',
+          parse_mode: 'HTML',
         }),
       });
       console.log(`[TELEGRAM] Capacity notification sent: ${emoji} ${newStatus}`);
@@ -165,7 +164,7 @@ async function sendTelegramRegistrationNotification(
   const { registrationId, status, seatNumber, waitlistPosition, memberId, name, mission, audioKey, audioBuffer, mimeType, audioFileId } = data;
   
   const statusEmoji = status === 'CONFIRMED' ? '✅' : '⏳';
-  const text = `${statusEmoji} 🆕 تسجيل متطوع جديد\n\nالاسم: ${name}\nرقم العضوية: ${memberId}\nالمهمة: ${mission.title}\nالحالة: ${status}${seatNumber ? `\nرقم المقعد: ${seatNumber}` : ''}${waitlistPosition ? `\nرقم الانتظار: ${waitlistPosition}` : ''}\n\n🎙️ التسجيل الصوتي متاح`;
+  const text = `${statusEmoji} 🆕 تسجيل متطوع جديد<br><br>الاسم: ${name}<br>رقم العضوية: ${memberId}<br>المهمة: ${mission.title}<br>الحالة: ${status}${seatNumber ? `<br>رقم المقعد: ${seatNumber}` : ''}${waitlistPosition ? `<br>رقم الانتظار: ${waitlistPosition}` : ''}<br><br>🎙️ التسجيل الصوتي متاح`;
 
   try {
     // Send text notification with inline keyboard
@@ -465,8 +464,9 @@ publicRegistrationRoutes.post('/register', async (c) => {
       newStatus = 'REJECTED';
     }
 
-    // Auto-close: if no more capacity and no waiting list space, mark mission as CLOSED
-    if (newStatus === 'REJECTED' || (available <= 0 && waitingList === 0 && confirmedCount >= capacity)) {
+    // Auto-close: when core capacity is full AND waitlist is full (or no waitlist)
+    const isCompletelyFull = available <= 0 && (waitingList === 0 || waitlistAvailable <= 0);
+    if (newStatus === 'REJECTED' || isCompletelyFull) {
       await c.env.DB.prepare(
         `UPDATE missions SET status = 'CLOSED', registration_close_at = datetime('now') WHERE id = ? AND status = 'OPEN'`
       ).bind(missionData.id).run();

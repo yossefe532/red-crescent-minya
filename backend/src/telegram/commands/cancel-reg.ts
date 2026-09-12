@@ -45,8 +45,7 @@ async function updateRegistrationStatus(
         seat_number = ?, 
         waitlist_position = ?, 
         confirmed_at = ?, 
-        cancelled_at = ?,
-        updated_at = datetime('now')
+        cancelled_at = ?
      WHERE id = ?`
   ).bind(status, seatNumber, waitlistPosition, confirmedAt, cancelledAt, regId).run();
 }
