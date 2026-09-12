@@ -267,8 +267,8 @@ publicRegistrationRoutes.post('/register', async (c) => {
       durationMs = body.duration_ms || 0;
       mimeType = body.mime_type || 'audio/webm';
 
-      if (body.audio_base64) {
-        const cleanBase64 = body.audio_base64.replace(/^data:audio\/[a-z0-9]+;base64,/, '');
+      if (body.audio_blob) {
+        const cleanBase64 = body.audio_blob.replace(/^data:audio\/[a-z0-9]+;base64,/, '');
         const binaryStr = atob(cleanBase64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) {
