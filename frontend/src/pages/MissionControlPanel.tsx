@@ -50,7 +50,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
     // 1. Instant optimistic update
     const newRegOpen = !isRegOpen;
     optimisticUpdate({ 
-      registration_close_at: newRegOpen ? localMission.end_at : new Date().toISOString(),
+      registration_close_at: newRegOpen ? null : new Date().toISOString(),
       registration_open_at: newRegOpen ? new Date().toISOString() : localMission.registration_open_at,
       status: newRegOpen ? 'OPEN' : 'CLOSED'
     });
@@ -65,7 +65,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
     } catch (err: any) {
       // Rollback on error
       optimisticUpdate({ 
-        registration_close_at: isRegOpen ? localMission.end_at : new Date().toISOString(),
+        registration_close_at: isRegOpen ? null : new Date().toISOString(),
         registration_open_at: isRegOpen ? new Date().toISOString() : localMission.registration_open_at,
         status: isRegOpen ? 'OPEN' : 'CLOSED'
       });
@@ -152,7 +152,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
       // Rollback on error
       optimisticUpdate({ 
         status: 'OPEN',
-        registration_close_at: localMission.end_at
+        registration_close_at: null
       });
       setSaveError(err.message || 'فشل إغلاق المهمة');
       setTimeout(() => setSaveError(null), 3000);

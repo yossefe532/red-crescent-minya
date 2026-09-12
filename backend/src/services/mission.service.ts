@@ -46,9 +46,9 @@ export async function createMission(db: D1Database, data: Record<string, unknown
   const now = new Date().toISOString();
   const confirmationPhrase = `أؤكد مشاركتي في مهمة ${publicCode}`;
   
-  // Registration window defaults to open immediately and close at end of mission
+  // Registration window defaults to open immediately, NULL close (open until manually closed)
   const registrationOpenAt = (data as any).registration_open_at ?? now;
-  const registrationCloseAt = (data as any).registration_close_at ?? data.end_at;
+  const registrationCloseAt = (data as any).registration_close_at ?? null;
   
   // Default waiting_list = 0, telegram_notifications = 1
   const waitingList = (data as any).waiting_list ?? 0;

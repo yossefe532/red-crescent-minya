@@ -25,9 +25,9 @@ export async function handleToggleRegistration(
   const updates: Record<string, unknown> = {};
 
   if (open) {
-    // Open registration: set open_at to now, close_at to end_at
+    // Open registration: set open_at to now, clear close_at (NULL = open until manually closed)
     updates.registration_open_at = nowIso;
-    updates.registration_close_at = mission.end_at;
+    updates.registration_close_at = null;
     updates.status = 'OPEN';
   } else {
     // Close registration: set close_at to now AND status to CLOSED
