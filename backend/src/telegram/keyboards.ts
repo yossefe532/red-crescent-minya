@@ -23,7 +23,7 @@ export function mainMenuKeyboard(): InlineKeyboard {
 // ─── Mission List Item ─────────────────────────────────────────
 export function missionListKeyboard(missionId: string, status: string): InlineKeyboard {
   const kb = new InlineKeyboard();
-  kb.text('📄 التفاصيل', `m:detail:${missionId}`);
+  kb.text('📄 التفاصيل', `m:detail_pub:${missionId}`);
   kb.text('👥 المتطوعين', `m:regs:${missionId}`);
   kb.row();
   if (status === 'OPEN') {
