@@ -191,7 +191,8 @@ export async function getMissionAvailability(db: D1Database, missionId: string) 
       (SELECT waiting_list FROM missions WHERE id = ?) as waiting_list,
       (SELECT telegram_notifications FROM missions WHERE id = ?) as telegram_notifications,
       (SELECT status FROM missions WHERE id = ?) as status
-  `).bind(missionId, missionId, missionId, missionId).first();
+    FROM registrations WHERE mission_id = ?
+  `).bind(missionId, missionId, missionId, missionId, missionId).first();
 
   const capacity = (result as any)?.capacity || 0;
   const confirmed = (result as any)?.confirmed || 0;
