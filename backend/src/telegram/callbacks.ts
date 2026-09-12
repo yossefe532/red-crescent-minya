@@ -292,11 +292,10 @@ async function handleMissionByPublicCode(
   token: string,
   chatId: number,
   db: D1Database,
-  publicCode: string
+  missionId: string
 ): Promise<void> {
   try {
-    const code = publicCode.match(/MNY-?\d+/i) ? publicCode.replace(/MNY-?(\d+)/i, 'MNY-$1') : publicCode;
-    const mission = await getMissionByPublicCode(db, code);
+    const mission = await getMissionById(db, missionId);
     if (mission) {
       const availability = await getMissionAvailability(db, mission.id);
       await tgSend(token, chatId, formatMissionDetail(mission, availability), {
