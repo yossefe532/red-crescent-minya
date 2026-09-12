@@ -52,7 +52,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
     optimisticUpdate({ 
       registration_close_at: newRegOpen ? localMission.end_at : new Date().toISOString(),
       registration_open_at: newRegOpen ? new Date().toISOString() : localMission.registration_open_at,
-      status: 'OPEN' // stays OPEN when toggling registration
+      status: newRegOpen ? 'OPEN' : 'CLOSED'
     });
     
     setSaveSuccess(true);
@@ -66,7 +66,8 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
       // Rollback on error
       optimisticUpdate({ 
         registration_close_at: isRegOpen ? localMission.end_at : new Date().toISOString(),
-        registration_open_at: isRegOpen ? new Date().toISOString() : localMission.registration_open_at
+        registration_open_at: isRegOpen ? new Date().toISOString() : localMission.registration_open_at,
+        status: isRegOpen ? 'OPEN' : 'CLOSED'
       });
       setSaveError(err.message || 'فشل تغيير حالة التسجيل');
       setTimeout(() => setSaveError(null), 3000);

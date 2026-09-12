@@ -192,8 +192,9 @@ adminRoutes.post('/missions/:id/toggle-registration', adminAuth, async (c) => {
       updates.registration_close_at = mission.end_at;
       updates.status = 'OPEN';
     } else {
-      // Close registration: set close_at to now
+      // Close registration: set close_at to now AND status to CLOSED
       updates.registration_close_at = nowIso;
+      updates.status = 'CLOSED';
     }
 
     const updated = await updateMission(c.env.DB, id, updates);
