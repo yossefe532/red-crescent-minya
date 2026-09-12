@@ -3,6 +3,7 @@
  * Unified AI + rule-based intent parser for Egyptian Arabic.
  */
 import { ParsedIntent, IntentType } from './types';
+import { resolveArabicDate } from './dateResolver';
 
 // ─── Rule-Based Intent Parser (Egyptian Arabic) ────────────────
 function parseWithRules(text: string): ParsedIntent {
@@ -154,12 +155,42 @@ function parseWithRules(text: string): ParsedIntent {
   return { intent: 'unknown', confidence: 0.2, extracted };
 }
 
+// ─── Fix year in date strings (2001→2026, etc.) ──────────────
+function fixYear(dateStr: string): string | null {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    // If year is before 2024, fix to current year
+    if (d.getFullYear() < 2024) {
+      const now = new Date();
+      d.setFullYear(now.getFullYear());
+      // If the resulting date is in the past, try next year
+      if (d.getTime() < now.getTime()) {
+        d.setFullYear(now.getFullYear() + 1);
+      }
+      return d.toISOString();
+    }
+    return null; // Year is fine, no fix needed
+  } catch {
+    return null;
+  }
+}
+
 // ─── AI Intent Parser (Cloudflare Workers AI) ────────────────
 async function parseWithAI(text: string, ai?: any): Promise<ParsedIntent | null> {
   if (!ai) return null;
 
+  // Get current date/time in Cairo for the AI prompt
+  const now = new Date();
+  const cairoNow = new Date(now.getTime() + (3 * 60 * 60 * 1000)); // Approx Cairo UTC+3
+  const todayStr = cairoNow.toISOString().split('T')[0]; // "YYYY-MM-DD"
+  const dayOfWeek = cairoNow.toLocaleDateString('ar-EG', { weekday: 'long', timeZone: 'Africa/Cairo' });
+
   const prompt = `أنت مساعد ذكي لتطبيق إدارة مهام الإسعاف.
 حلل الرسالة التالية واستخرج النية والبيانات.
+
+⏰ التاريخ الحالي: ${todayStr} (${dayOfWeek})
+⚠️Important: You MUST use the year 2026 for all dates. Current year is 2026.
 
 الرسالة: \"${text}\"
 
@@ -178,7 +209,7 @@ async function parseWithAI(text: string, ai?: any): Promise<ParsedIntent | null>
   }
 }
 
-أمثلة:
+أمثلة (مع الحالية ${todayStr}):
 - \"اعمل مهمه اسمها اسعاف حادث في ديرمواس الساعه 3\" → intent: create_mission, extracted: {title: \"إسعاف حادث\", location: \"ديرمواس\", time: \"الساعة 3\", capacity: null}
 - \"شوف المهمات\" → intent: list_missions
 - \"شيل أحمد رقم عضويته 123 من مهمه MNY-379\" → intent: cancel_registration, extracted: {memberNumber: \"123\", missionCode: \"MNY-379\"}
@@ -221,6 +252,24 @@ async function parseWithAI(text: string, ai?: any): Promise<ParsedIntent | null>
             ''
           ).trim();
         }
+      }
+      // ── Fix year: if AI returned dates with wrong year (e.g. 2001), fix to current
+      if ((parsed.extracted as any).start_at) {
+        const fixed = fixYear((parsed.extracted as any).start_at);
+        if (fixed) (parsed.extracted as any).start_at = fixed;
+      }
+      if ((parsed.extracted as any).end_at) {
+        const fixed = fixYear((parsed.extracted as any).end_at);
+        if (fixed) (parsed.extracted as any).end_at = fixed;
+      }
+      // ── Resolve Arabic relative dates in extracted fields ──
+      if ((parsed.extracted as any).start_at && !(parsed.extracted as any).start_at.includes('T')) {
+        const resolved = resolveArabicDate((parsed.extracted as any).start_at);
+        if (resolved) (parsed.extracted as any).start_at = resolved;
+      }
+      if ((parsed.extracted as any).end_at && !(parsed.extracted as any).end_at.includes('T')) {
+        const resolved = resolveArabicDate((parsed.extracted as any).end_at);
+        if (resolved) (parsed.extracted as any).end_at = resolved;
       }
     }
     return parsed;

@@ -12,6 +12,7 @@ import {
 } from '../keyboards';
 import { createMission } from '../../services/mission.service';
 import { logAudit } from '../../services/audit.service';
+import { resolveArabicDate, nowInCairo } from '../dateResolver';
 
 // ─── Start Create Wizard ───────────────────────────────────────
 export async function startCreateWizard(
@@ -98,15 +99,10 @@ export async function handleCreateStart(
   db: D1Database,
   startAtText: string
 ): Promise<void> {
-  // Try to parse the date - simple approach
+  // Resolve Arabic date expression to ISO string
   let startAt: string | null = null;
-  try {
-    const parsed = new Date(startAtText);
-    if (!isNaN(parsed.getTime())) {
-      startAt = parsed.toISOString();
-    }
-  } catch {
-    // Keep as null, will use default in execution
+  if (startAtText && startAtText.trim()) {
+    startAt = resolveArabicDate(startAtText, nowInCairo());
   }
 
   const session = await getSession(db, chatId);
@@ -127,14 +123,10 @@ export async function handleCreateEnd(
   db: D1Database,
   endAtText: string
 ): Promise<void> {
+  // Resolve Arabic date expression to ISO string
   let endAt: string | null = null;
-  try {
-    const parsed = new Date(endAtText);
-    if (!isNaN(parsed.getTime())) {
-      endAt = parsed.toISOString();
-    }
-  } catch {
-    // Keep as null
+  if (endAtText && endAtText.trim()) {
+    endAt = resolveArabicDate(endAtText, nowInCairo());
   }
 
   const session = await getSession(db, chatId);
