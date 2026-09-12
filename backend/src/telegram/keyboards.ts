@@ -137,7 +137,7 @@ export function editFieldKeyboard(missionId: string): InlineKeyboard {
     .text('📅 النهاية', `edit:field:${missionId}:end_at`)
     .row()
     .text('⏳ الانتظار', `edit:field:${missionId}:waiting_list`)
-    .text('🔙 رجوع', `m:detail:${missionId}`);
+    .text('🔙 رجوع', `m:detail_pub:${missionId}`);
 }
 
 // ─── Notification Settings ─────────────────────────────────────
@@ -155,7 +155,7 @@ export function notificationSettingsKeyboard(isOn: boolean): InlineKeyboard {
 // ─── Back Buttons ──────────────────────────────────────────────
 export function backToMissionKeyboard(missionId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('📄 التفاصيل', `m:detail:${missionId}`)
+    .text('📄 التفاصيل', `m:detail_pub:${missionId}`)
     .text('🏠 الرئيسية', 'nav:home');
 }
 
@@ -163,7 +163,7 @@ export function backToHomeKeyboard(): InlineKeyboard {
   return new InlineKeyboard().text('🏠 الرئيسية', 'nav:home');
 }
 
-// ─── Mission Picker (for commands that need one) ───────────────
+// ─── Mission Picker (for commands that need one) ─────────────
 export function missionPickerKeyboard(
   missions: Array<{ id: string; public_code: string; title: string; status?: string }>,
   callbackPrefix: string
@@ -171,8 +171,8 @@ export function missionPickerKeyboard(
   const kb = new InlineKeyboard();
   for (const m of missions) {
     const statusIcon = m.status === 'OPEN' ? '🟢' : m.status === 'CLOSED' ? '🔴' : '📝';
-    // Use m:detail:public_code so clicking shows mission details by public code
-    kb.text(`${statusIcon} ${m.public_code} — ${escapeHtml(m.title)}`, `m:detail:${m.public_code}`).row();
+    // Use m:detail_pub:<id> so the callback handler can look up by ID
+    kb.text(`${statusIcon} ${m.public_code} — ${escapeHtml(m.title)}`, `m:detail_pub:${m.id}`).row();
   }
   kb.text('❌ إلغاء', 'nav:home');
   return kb;

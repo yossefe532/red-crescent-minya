@@ -244,6 +244,10 @@ async function handleMission(
     case 'detail':
       if (missionId) await handleMissionDetail(token, chatId, db, missionId);
       break;
+    case 'detail_pub':
+      // m:detail_pub:MNY-XXX from missionPickerKeyboard
+      await handleMissionByPublicCode(token, chatId, db, missionId);
+      break;
     case 'regs':
       if (missionId) await handleRegistrants(token, chatId, db, missionId);
       break;
@@ -278,6 +282,32 @@ async function handleMission(
     case 'delete':
       if (missionId) await startDeleteWizard(token, chatId, db, missionId);
       break;
+    case 'delete_pick':
+      if (missionId) await executeDelete(token, chatId, db, missionId);
+      break;
+  }
+}
+
+async function handleMissionByPublicCode(
+  token: string,
+  chatId: number,
+  db: D1Database,
+  publicCode: string
+): Promise<void> {
+  try {
+    const code = publicCode.match(/MNY-?\d+/i) ? publicCode.replace(/MNY-?(\d+)/i, 'MNY-$1') : publicCode;
+    const mission = await getMissionByPublicCode(db, code);
+    if (mission) {
+      const availability = await getMissionAvailability(db, mission.id);
+      await tgSend(token, chatId, formatMissionDetail(mission, availability), {
+        reply_markup: missionDetailKeyboard(mission.id, mission.status ?? 'DRAFT')
+      });
+    } else {
+      await tgSend(token, chatId, '❌ المهمة غير موجودة.');
+    }
+  } catch (err: any) {
+    console.error('[handleMissionByPublicCode]', err);
+    await tgSend(token, chatId, `❌ خطأ: ${err?.message || String(err)}`, { reply_markup: mainMenuKeyboard() });
   }
 }
 
