@@ -73,6 +73,75 @@ async function sendRegistrationNotification(
 }
 
 // ─── Telegram Notification Helper ──────────────────────────
+// ─── Send Capacity Notifications ──────────────────────────────
+async function sendCapacityNotifications(
+  token: string | undefined,
+  adminChatIds: string | undefined,
+  data: {
+    mission: { publicCode: string; title: string };
+    newStatus: string;
+    confirmedCount: number;
+    capacity: number;
+    waitlistCount: number;
+    waitingList: number;
+    name: string;
+  }
+): Promise<void> {
+  if (!token || !adminChatIds) return;
+
+  const chatId = adminChatIds.split(',')[0].trim();
+  const { mission, newStatus, confirmedCount, capacity, waitlistCount, waitingList } = data;
+
+  try {
+    let text = '';
+    let emoji = '';
+
+    // CASE 1: Core capacity just reached (this registration was the last CONFIRMED spot)
+    if (newStatus === 'CONFIRMED' && confirmedCount >= capacity && waitingList > 0) {
+      emoji = '⚠️';
+      text = `${emoji} *العدد الأساسي كتمل\\!*\n\n` +
+        `المهمة: ${mission.title} \\(` + mission.publicCode + `\\)\n` +
+        `العدد الأساسي: ${capacity} \\✅ مكتمل\n` +
+        `انتظار: ${waitingList} مقعد متاح\n\n` +
+        `تم فتح قائمة الانتظار\\. المتطوع الجديد هيبقى في الانتظار.`;
+    }
+    // CASE 2: Waitlist just filled
+    else if (newStatus === 'WAITLIST' && waitlistCount >= waitingList) {
+      emoji = '🔴';
+      text = `${emoji} *العدد كتمل بالكامل\\!*\n\n` +
+        `المهمة: ${mission.title} \\(` + mission.publicCode + `\\)\n` +
+        `العدد الأساسي: ${capacity} \\✅\n` +
+        `قائمة الانتظار: ${waitingList} \\✅ مكتملة\n\n` +
+        `⚠️ لا يوجد مقاعد متاحة\\. التسجيل nuevos هيترفض.`;
+    }
+    // CASE 3: Mission fully complete (core + waitlist all filled)
+    else if (newStatus === 'WAITLIST' && waitlistCount >= waitingList && confirmedCount >= capacity) {
+      emoji = '🏆';
+      text = `${emoji} *اكتملت المهمة بالكامل\\!*\n\n` +
+        `المهمة: ${mission.title} \\(` + mission.publicCode + `\\)\n` +
+        `العدد الأساسي: ${capacity}\\✅\n` +
+        `الانتظار: ${waitingList}\\✅\n` +
+        `الاجمالي: ${capacity + waitingList} متطوع\n\n` +
+        `📊 لعرض الاحصاءات: /missions`;
+    }
+
+    if (text) {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          parse_mode: 'MarkdownV2',
+        }),
+      });
+      console.log(`[TELEGRAM] Capacity notification sent: ${emoji} ${newStatus}`);
+    }
+  } catch (e) {
+    console.error('Failed to send capacity notification:', e);
+  }
+}
+
 async function sendTelegramRegistrationNotification(
   token: string | undefined,
   adminChatIds: string | undefined,
@@ -539,6 +608,23 @@ publicRegistrationRoutes.post('/register', async (c) => {
           audioFileId: audioStoredInR2 ? audioKey : null, // If stored in R2, we have the key
         }
       ).catch(err => console.error('Telegram notification failed:', err));
+    }
+
+    // 13. Send capacity notifications (core reached / waitlist full / mission complete)
+    if (missionData.telegram_notifications === 1) {
+      sendCapacityNotifications(
+        c.env.TELEGRAM_BOT_TOKEN,
+        c.env.ADMIN_CHAT_IDS,
+        {
+          mission: { publicCode: missionData.public_code, title: missionData.title },
+          newStatus,
+          confirmedCount: newStatus === 'CONFIRMED' ? confirmedCount + 1 : confirmedCount,
+          capacity,
+          waitlistCount: newStatus === 'WAITLIST' ? waitlistCount + 1 : waitlistCount,
+          waitingList: waitingList || 0,
+          name: storedName,
+        }
+      ).catch(err => console.error('Capacity notification failed:', err));
     }
 
   } catch (err: any) {
