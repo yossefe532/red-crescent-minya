@@ -144,3 +144,12 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON admin_sessions(expires_at);
+
+-- ============================================================
+-- TABLE: settings (key-value store for bot config, e.g. notifications_enabled)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);

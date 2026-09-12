@@ -9,6 +9,7 @@ export interface Env {
   TELEGRAM_BOT_TOKEN?: string;
   ADMIN_CHAT_IDS?: string;
   AI_API_KEY?: string;       // Cloudflare Workers AI API key
+  AI?: any;                  // Workers AI binding (for Telegram NLU)
 }
 
 export type AppEnv = {
