@@ -2,6 +2,13 @@
 
 ## Implemented
 
+### Status Toggle Buttons (WAITLIST <-> CONFIRMED)
+- ✅ Admin panel registrations table now has `[تأكيد]` / `[تحويل للانتظار]` buttons per member
+- ✅ Mirrors Telegram bot `handleVolunteerMove` logic exactly (same DB queries, seat/waitlist allocation, auto-promote on free seat, audit trail)
+- ✅ Backend: new endpoint `POST /api/admin/registrations/:regId/status` (adminAuth-protected, validates status, conflicts on CANCELLED or same-status)
+- ✅ Frontend: `moveRegistrationStatus()` API function + desktop table button + mobile card buttons
+- ✅ Toast feedback + optimistic re-fetch, loading spinner per-row, no Emoji in UI
+
 ### Phase 0: Foundation
 - ✅ Cairo font added via Google Fonts (Arabic-first typography)
 - ✅ `user-scalable=no` removed from viewport meta
