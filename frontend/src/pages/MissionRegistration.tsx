@@ -77,11 +77,11 @@ export function MissionRegistration() {
 
   useEffect(() => {
     fetchMissionData(true);
-    const interval = setInterval(() => fetchMissionData(false), 6000);
+    const interval = setInterval(() => fetchMissionData(false), 3000);
     return () => clearInterval(interval);
   }, [code]);
 
-  // 1b. FAST status polling (every 1s) with change detection — auto-close
+  // 1b. FAST status polling (every 3s) with change detection — auto-close
   const lastStatusRef = useRef<string>('');
 
   useEffect(() => {

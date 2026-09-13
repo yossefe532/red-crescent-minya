@@ -14,7 +14,7 @@ binding = "DB"
 database_name = "red-crescent-minya"
 database_id = "3ef5df17-01db-4f33-b331-ed498116da81"
 
-# R2 Bucket binding (enable R2 in Cloudflare Dashboard first)
+# R2 Bucket binding (enable R2 in Cloudflare Dashboard first, then uncomment)
 # [[r2_buckets]]
 # binding = "AUDIO_BUCKET"
 # bucket_name = "red-crescent-minya-audio"
@@ -22,6 +22,10 @@ database_id = "3ef5df17-01db-4f33-b331-ed498116da81"
 # Workers AI binding for the smart Telegram bot (NLU for colloquial Arabic)
 [ai]
 binding = "AI"
+
+# Scheduled notification processor (drains notification_events outbox)
+[triggers]
+crons = ["* * * * *"]
 
 # Environment variables (secrets via wrangler secret put)
 [vars]
@@ -45,3 +49,11 @@ binding = "AI"
 binding = "DB"
 database_name = "red-crescent-minya"
 database_id = "3ef5df17-01db-4f33-b331-ed498116da81"
+
+[env.production.triggers]
+crons = ["* * * * *"]
+
+# R2: Enable R2 in Cloudflare Dashboard first, then uncomment:
+# [[env.production.r2_buckets]]
+# binding = "AUDIO_BUCKET"
+# bucket_name = "red-crescent-minya-audio"

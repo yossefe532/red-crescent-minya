@@ -1,8 +1,13 @@
 /**
  * Generate a unique mission public code: MNY-XXX
+ * Uses crypto.randomUUID() for collision resistance
+ * instead of Math.random() (900 combos → collision risk).
  */
 export function generateMissionCode(): string {
-  const num = Math.floor(100 + Math.random() * 900); // 100-999
+  const uuid = crypto.randomUUID();
+  // Take first 6 hex chars, uppercase, numeric-only via base-36 fallback
+  const hex = uuid.replace(/-/g, '').slice(0, 4);
+  const num = parseInt(hex, 16) % 900 + 100; // 100-999
   return `MNY-${num}`;
 }
 

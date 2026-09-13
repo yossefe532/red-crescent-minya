@@ -3,6 +3,7 @@ import { Env } from '../env';
 import { success, Errors } from '../utils/response';
 import { generateRegistrationId, generateUUID, generateAudioKey } from '../utils/id';
 import { logAudit } from '../services/audit.service';
+import { createNotificationEvent, processPendingNotifications } from '../services/notification_outbox';
 import { InlineKeyboard } from 'grammy';
 
 // ─── Telegram Notification Helpers ──────────────────────
@@ -72,148 +73,10 @@ async function sendRegistrationNotification(
   }
 }
 
-// ─── Telegram Notification Helper ──────────────────────────
-// ─── Send Capacity Notifications ──────────────────────────────
-async function sendCapacityNotifications(
-  token: string | undefined,
-  adminChatIds: string | undefined,
-  data: {
-    mission: { publicCode: string; title: string };
-    newStatus: string;
-    confirmedCount: number;
-    capacity: number;
-    waitlistCount: number;
-    waitingList: number;
-    name: string;
-  }
-): Promise<void> {
-  if (!token || !adminChatIds) return;
-
-  const chatId = adminChatIds.split(',')[0].trim();
-  const { mission, newStatus, confirmedCount, capacity, waitlistCount, waitingList } = data;
-
-  try {
-    let text = '';
-    let emoji = '';
-
-    // CASE 1: Core capacity just reached
-    if (newStatus === 'CONFIRMED' && confirmedCount >= capacity && waitingList > 0) {
-      emoji = '⚠️';
-      text = `${emoji} <b>العدد الأساسي كتمل!</b><br><br>`
-        + `المهمة: ${mission.title} (${mission.publicCode})<br>`
-        + `العدد الأساسي: ${capacity} ✅ مكتمل<br>`
-        + `انتظار: ${waitingList} مقعد متاح<br><br>`
-        + `تم فتح قائمة الانتظار. المتطوع الجديد هيبقى في الانتظار.`;
-    }
-    // CASE 2: Waitlist just filled
-    else if (newStatus === 'WAITLIST' && waitlistCount >= waitingList) {
-      emoji = '🔴';
-      text = `${emoji} <b>العدد كتمل بالكامل!</b><br><br>`
-        + `المهمة: ${mission.title} (${mission.publicCode})<br>`
-        + `العدد الأساسي: ${capacity} ✅<br>`
-        + `قائمة الانتظار: ${waitingList} ✅ مكتملة<br><br>`
-        + `⚠️ لا يوجد مقاعد متاحة. التسجيل هيترفض.`;
-    }
-    // CASE 3: Mission fully complete (core + waitlist all filled)
-    else if (confirmedCount >= capacity && (waitlistCount || 0) >= (waitingList || 0)) {
-      emoji = '🏆';
-      text = `${emoji} <b>اكتملت المهمة بالكامل!</b><br><br>`
-        + `المهمة: ${mission.title} (${mission.publicCode})<br>`
-        + `العدد الأساسي: ${capacity} ✅<br>`
-        + `الانتظار: ${waitingList} ✅<br>`
-        + `الاجمالي: ${capacity + waitingList} متطوع<br><br>`
-        + `📊 لعرض الاحصاءات: /missions`;
-    }
-    if (text) {
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text,
-          parse_mode: 'HTML',
-        }),
-      });
-      console.log(`[TELEGRAM] Capacity notification sent: ${emoji} ${newStatus}`);
-    }
-  } catch (e) {
-    console.error('Failed to send capacity notification:', e);
-  }
-}
-
-async function sendTelegramRegistrationNotification(
-  token: string | undefined,
-  adminChatIds: string | undefined,
-  data: {
-    registrationId: string;
-    status: string;
-    seatNumber: number | null;
-    waitlistPosition: number | null;
-    memberId: string;
-    name: string;
-    mission: { publicCode: string; title: string; capacity: number; waitingList: number };
-    audioKey: string;
-    audioBuffer: Uint8Array | null;
-    mimeType: string;
-    audioFileId?: string | null;
-  }
-): Promise<void> {
-  if (!token || !adminChatIds) return;
-  
-  const chatId = adminChatIds.split(',')[0].trim();
-  const { registrationId, status, seatNumber, waitlistPosition, memberId, name, mission, audioKey, audioBuffer, mimeType, audioFileId } = data;
-  
-  const statusEmoji = status === 'CONFIRMED' ? '✅' : '⏳';
-  const text = `${statusEmoji} 🆕 تسجيل متطوع جديد<br><br>الاسم: ${name}<br>رقم العضوية: ${memberId}<br>المهمة: ${mission.title}<br>الحالة: ${status}${seatNumber ? `<br>رقم المقعد: ${seatNumber}` : ''}${waitlistPosition ? `<br>رقم الانتظار: ${waitlistPosition}` : ''}<br><br>🎙️ التسجيل الصوتي متاح`;
-
-  try {
-    // Send text notification with inline keyboard
-    const kb = new InlineKeyboard();
-    kb.text('🎙️ استمع للتسجيل', `voice:${mission.publicCode}:${status}`)
-      .text('👋 رجوع', 'cancel:action')
-      .row();
-
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        chat_id: chatId, 
-        text, 
-        parse_mode: 'HTML',
-        reply_markup: kb,
-      }),
-    });
-    
-    // Try to fetch file_id from audio_confirmations if not provided
-    let fileId = audioFileId || null;
-    if (!fileId && audioBuffer && audioBuffer.length > 0) {
-      // Audio is stored — get file_id from R2 (if available) or skip
-      console.log('[TELEGRAM] Audio stored in R2/D1 but no file_id available');
-    }
-    
-    // Send audio if available
-    if (audioBuffer && audioBuffer.length > 0) {
-      try {
-        const base64Audio = btoa(String.fromCharCode.apply(null, Array.from(audioBuffer)));
-        // Telegram allows max 50MB per audio file
-        await fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            audio: `data:${mimeType};base64,${base64Audio}`,
-            caption: `🎙️ تسجيل ${name} - ${mission.title}`,
-            duration: Math.floor(audioBuffer.length / 8000),
-          }),
-        });
-      } catch (e) {
-        console.warn('[TELEGRAM] Audio send failed (too large or format issue):', e);
-      }
-    }
-  } catch (e) {
-    console.error('Failed to send Telegram notification:', e);
-  }
-}
+// ─── Notification Helper (voice-delivery only) ─────────────
+// Registration notifications are now durable via the outbox (notification_events).
+// The legacy sendCapacityNotifications and sendTelegramRegistrationNotification
+// were dead code (they ran after `return`) and have been removed.
 
 const publicRegistrationRoutes = new Hono<{ Bindings: Env }>();
 
@@ -428,6 +291,11 @@ publicRegistrationRoutes.post('/register', async (c) => {
           }
         }, 409);
       }
+      // If PENDING from a failed previous attempt, clean up the orphan so retry can proceed
+      if (ex.status === 'PENDING') {
+        await c.env.DB.prepare(`DELETE FROM audio_confirmations WHERE registration_id = ?`).bind(ex.id).run();
+        await c.env.DB.prepare(`DELETE FROM registrations WHERE id = ? AND status = 'PENDING'`).bind(ex.id).run();
+      }
     }
 
     // 7. Atomic Seat Allocation with Waiting List Support
@@ -449,31 +317,7 @@ publicRegistrationRoutes.post('/register', async (c) => {
     let seatNumber: number | null = null;
     let waitlistPosition: number | null = null;
 
-    // Check if mission should be auto-closed
-    const available = capacity - confirmedCount;
-    const waitlistAvailable = waitingList > 0 ? (waitingList - waitlistCount) : 0;
-
-    if (available > 0) {
-      newStatus = 'CONFIRMED';
-      seatNumber = confirmedCount + 1;
-    } else if (waitingList > 0 && waitlistAvailable > 0) {
-      newStatus = 'WAITLIST';
-      waitlistPosition = waitlistCount + 1;
-    } else {
-      // No seats and no waiting list space - close the mission
-      newStatus = 'REJECTED';
-    }
-
-    // Auto-close: when core capacity is full AND waitlist is full (or no waitlist)
-    const isCompletelyFull = available <= 0 && (waitingList === 0 || waitlistAvailable <= 0);
-    if (newStatus === 'REJECTED' || isCompletelyFull) {
-      await c.env.DB.prepare(
-        `UPDATE missions SET status = 'CLOSED', registration_close_at = datetime('now') WHERE id = ? AND status = 'OPEN'`
-      ).bind(missionData.id).run();
-      missionData.status = 'CLOSED';
-    }
-
-    // Get sequence number
+    // Get sequence number first (needed for registrationId)
     const seqResult = await c.env.DB.prepare(
       `SELECT COALESCE(MAX(registration_sequence), 0) + 1 as next_seq FROM registrations WHERE mission_id = ?`
     ).bind(missionData.id).first();
@@ -481,9 +325,97 @@ publicRegistrationRoutes.post('/register', async (c) => {
 
     const registrationId = `${missionData.public_code}-REG-${String(nextSeq).padStart(6, '0')}`;
     const audioKey = generateAudioKey(missionData.public_code, registrationId);
-    const usedPhrase = phrase || missionData.confirmation_phrase || `أؤكد مشاركتي في مهمة ${missionData.public_code}`;
 
-    // 8. Store audio (R2 primary, D1 blob fallback)
+    // 7. Save registration as PENDING first (INSERT before seat allocation)
+    await c.env.DB.prepare(
+      `INSERT INTO registrations (
+        id, mission_id, volunteer_id, status, seat_number, waitlist_position,
+        registration_sequence, request_id, created_at
+      ) VALUES (?, ?, ?, 'PENDING', NULL, NULL, ?, ?, datetime('now'))`
+    ).bind(registrationId, missionData.id, volunteerId, nextSeq, request_id || null).run();
+
+    // 8. Atomic seat allocation using conditional UPDATE.
+    // Row now exists as PENDING — UPDATE can find it.
+    // Prevents double-booking the last seat via D1 atomic UPDATE + WHERE.
+    const claimResult = await c.env.DB.prepare(
+      `UPDATE registrations SET status = 'CONFIRMED', seat_number = COALESCE(
+        (SELECT MAX(seat_number) FROM registrations WHERE mission_id = ? AND status = 'CONFIRMED'), 0
+      ) + 1 WHERE id = ? AND status = 'PENDING'
+       AND (SELECT COUNT(*) FROM registrations WHERE mission_id = ? AND status = 'CONFIRMED') < ?`
+    ).bind(missionData.id, registrationId, missionData.id, capacity).run();
+
+    if (claimResult.meta.changes > 0) {
+      newStatus = 'CONFIRMED';
+      seatNumber = (await c.env.DB.prepare(
+        `SELECT seat_number FROM registrations WHERE id = ?`
+      ).bind(registrationId).first() as any)?.seat_number;
+
+      // AUTO-CLOSE: When confirmed fills capacity AND waitlist is also full (or no waitlist)
+      try {
+        const finalConfirmedCount = confirmedCount + 1;
+        const waitingCap = waitingList || 0;
+        const shouldClose = (finalConfirmedCount >= capacity) && (waitingCap === 0 || waitlistCount >= waitingCap);
+        if (shouldClose && missionData.status === 'OPEN') {
+          await c.env.DB.prepare(
+            `UPDATE missions SET status = 'CLOSED', registration_close_at = datetime('now') WHERE id = ? AND status = 'OPEN'`
+          ).bind(missionData.id).run();
+          missionData.status = 'CLOSED';
+          console.log(`[REGISTRATION] AUTO-CLOSED mission ${missionData.public_code}: confirmed=${finalConfirmedCount}/${capacity}, waitlist=${waitlistCount}/${waitingCap}`);
+        }
+      } catch (autoCloseErr) {
+        console.error('[REGISTRATION] Failed auto-close on capacity full:', autoCloseErr);
+      }
+    } else {
+      // Try waitlist claim
+      const wlClaim = await c.env.DB.prepare(
+        `UPDATE registrations SET status = 'WAITLIST', waitlist_position = COALESCE(
+          (SELECT MAX(waitlist_position) FROM registrations WHERE mission_id = ? AND status = 'WAITLIST'), 0
+        ) + 1 WHERE id = ? AND status = 'PENDING'
+         AND (SELECT COUNT(*) FROM registrations WHERE mission_id = ? AND status = 'WAITLIST') < ?`
+      ).bind(missionData.id, registrationId, missionData.id, waitingList).run();
+
+      if (wlClaim.meta.changes > 0) {
+        newStatus = 'WAITLIST';
+        waitlistPosition = (await c.env.DB.prepare(
+          `SELECT waitlist_position FROM registrations WHERE id = ?`
+        ).bind(registrationId).first() as any)?.waitlist_position;
+
+        // BUG 5 FIX: Auto-close when both capacity and waiting list are full
+        try {
+          const updatedWaitlistCount = waitlistCount + 1;
+          if (confirmedCount >= capacity && updatedWaitlistCount >= (waitingList || 0) && waitingList > 0) {
+            await c.env.DB.prepare(
+              `UPDATE missions SET status = 'CLOSED', registration_close_at = datetime('now') WHERE id = ? AND status = 'OPEN'`
+            ).bind(missionData.id).run();
+            missionData.status = 'CLOSED';
+          }
+        } catch (closeErr) {
+          console.error('[REGISTRATION] Failed to auto-close mission after waitlist full:', closeErr);
+        }
+      } else {
+        // No seats and no waiting list space — reject
+        newStatus = 'REJECTED';
+        try {
+          await c.env.DB.prepare(
+            `UPDATE registrations SET status = 'REJECTED' WHERE id = ? AND status = 'PENDING'`
+          ).bind(registrationId).run();
+        } catch (rejectErr) {
+          console.error('[REGISTRATION] Failed to set REJECTED status:', rejectErr);
+        }
+
+        // Auto-close when fully full (independent of REJECTED update success)
+        try {
+          await c.env.DB.prepare(
+            `UPDATE missions SET status = 'CLOSED', registration_close_at = datetime('now') WHERE id = ? AND status = 'OPEN'`
+          ).bind(missionData.id).run();
+          missionData.status = 'CLOSED';
+        } catch (closeErr) {
+          console.error('[REGISTRATION] Failed to auto-close mission:', closeErr);
+        }
+      }
+    }
+
+    // 9. Save R2 audio
     let audioStoredInR2 = false;
     try {
       await c.env.AUDIO_BUCKET.put(audioKey, audioBuffer, {
@@ -501,28 +433,17 @@ publicRegistrationRoutes.post('/register', async (c) => {
       console.error('R2 Audio upload failed, falling back to D1 blob:', storageErr);
     }
 
-    // 9. Save registration in DB
-    const confirmedAt = newStatus === 'CONFIRMED' ? new Date().toISOString() : null;
-    await c.env.DB.prepare(
-      `INSERT INTO registrations (
-        id, mission_id, volunteer_id, status, seat_number, waitlist_position,
-        registration_sequence, request_id, created_at, confirmed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`
-    ).bind(
-      registrationId,
-      missionData.id,
-      volunteerId,
-      newStatus,
-      seatNumber,
-      waitlistPosition,
-      nextSeq,
-      request_id || null,
-      confirmedAt
-    ).run();
+    // 10. Update confirmed_at if needed
+    if (newStatus === 'CONFIRMED') {
+      await c.env.DB.prepare(
+        `UPDATE registrations SET confirmed_at = datetime('now') WHERE id = ?`
+      ).bind(registrationId).run();
+    }
 
     // 10. Save audio confirmation record
     const audioId = generateUUID();
     const estDurationMs = durationMs || Math.max(2000, Math.floor(audioBuffer.byteLength / 8));
+    const usedPhrase = phrase || missionData.confirmation_phrase || `أؤكد مشاركتي في مهمة ${missionData.public_code}`;
     // D1 does NOT support raw BLOB binds (turns them into CSV text), so store base64 text
     let audioB64: string | null = null;
     if (!audioStoredInR2 && audioBuffer) {
@@ -558,76 +479,111 @@ publicRegistrationRoutes.post('/register', async (c) => {
       }
     });
 
-    return success(c, {
-      registration_id: registrationId,
-      status: newStatus,
-      seat_number: seatNumber,
-      waitlist_position: waitlistPosition,
-      registration_sequence: nextSeq,
-      member_id: member_id,
-      name: storedName,
-      mission: {
-        public_code: missionData.public_code,
-        title: missionData.title,
-        capacity: capacity,
-        waiting_list: waitingList,
-        confirmed: newStatus === 'CONFIRMED' ? confirmedCount + 1 : confirmedCount,
-        available: Math.max(0, capacity - (newStatus === 'CONFIRMED' ? confirmedCount + 1 : confirmedCount)),
-        waitlist_available: Math.max(0, (waitingList || 0) - waitlistCount),
-        telegram_notifications: missionData.telegram_notifications,
-      },
-      message: newStatus === 'CONFIRMED' 
-        ? `تم تأكيد تسجيلك بنجاح! رقم مقعدك: ${seatNumber}`
-        : newStatus === 'WAITLIST'
-          ? `اكتملت المقاعد المتاحة. تم إضافتك إلى قائمة الانتظار برقم: ${waitlistPosition}`
-          : `عذراً، تم الوصول للسعة القصوى لهذه المهمة. التسجيل مغلق.`,
-    }, 201);
+    // ─── 12. Outbox: queue Telegram notifications (durable, retryable) ───
+        // Registration success MUST NOT fail because Telegram is slow/unavailable.
+        // Instead of fire-and-forget fetch() calls (which are lost on failure),
+        // write notification_events rows that the scheduled worker drains.
+        // This replaces the old dead code that ran AFTER return and never executed.
+        if (missionData.telegram_notifications === 1 && (newStatus === 'CONFIRMED' || newStatus === 'WAITLIST')) {
+          try {
+            const chatId = (c.env.ADMIN_CHAT_IDS || '').split(',')[0].trim();
+            if (chatId) {
+              const statusEmoji = newStatus === 'CONFIRMED' ? '✅' : '⏳';
+              const text =
+                `${statusEmoji} 🆕 تسجيل متطوع جديد\n\n` +
+                `👤 الاسم: ${storedName}\n` +
+                `🏷️ رقم العضوية: ${member_id}\n` +
+                `📋 المهمة: ${missionData.public_code} (${missionData.title})\n` +
+                `📊 الحالة: ${newStatus}${seatNumber ? `\n💺 رقم المقعد: ${seatNumber}` : ''}${waitlistPosition ? `\n⏳ رقم الانتظار: ${waitlistPosition}` : ''}`;
 
-    // 12. Send Telegram notification if enabled and status is CONFIRMED or WAITLIST
-    if (missionData.telegram_notifications === 1 && (newStatus === 'CONFIRMED' || newStatus === 'WAITLIST')) {
-      // Fire-and-forget notification (don't await to avoid blocking response)
-      sendTelegramRegistrationNotification(
-        c.env.TELEGRAM_BOT_TOKEN,
-        c.env.ADMIN_CHAT_IDS,
-        {
-          registrationId,
-          status: newStatus,
-          seatNumber,
-          waitlistPosition,
-          memberId: member_id,
-          name: storedName,
-          mission: {
-            publicCode: missionData.public_code,
-            title: missionData.title,
-            capacity,
-            waitingList,
-          },
-          audioKey,
-          audioBuffer,
-          mimeType,
-          audioFileId: audioStoredInR2 ? audioKey : null, // If stored in R2, we have the key
+              const keyboard = [
+                [
+                  { text: '🎙️ استمع للتسجيل', callback_data: `v:audio:${registrationId}` },
+                ],
+                [
+                  { text: '👋 رجوع', callback_data: 'cancel:action' },
+                ],
+              ];
+
+              await createNotificationEvent(c.env.DB, {
+                eventType: 'REGISTRATION',
+                registrationId,
+                missionId: missionData.id,
+                adminChatId: chatId,
+                payload: JSON.stringify({ text, keyboard, chat_id: chatId }),
+              });
+
+              // ─── INSTANT DELIVERY: Process the just-queued event immediately ───
+              // Don't wait for the next cron tick (up to 60s). Send now; the outbox
+              // retries on failure anyway.
+              processPendingNotifications(c.env.DB, c.env.TELEGRAM_BOT_TOKEN || '', c.env.ADMIN_CHAT_IDS || '')
+                .catch(err => console.error('[OUTBOX-INSTANT] Background send failed (cron will retry):', err));
+            }
+          } catch (outboxErr) {
+            console.error('[OUTBOX] Failed to queue registration notification:', outboxErr);
+          }
         }
-      ).catch(err => console.error('Telegram notification failed:', err));
-    }
 
-    // 13. Send capacity notifications (core reached / waitlist full / mission complete)
-    if (missionData.telegram_notifications === 1) {
-      sendCapacityNotifications(
-        c.env.TELEGRAM_BOT_TOKEN,
-        c.env.ADMIN_CHAT_IDS,
-        {
-          mission: { publicCode: missionData.public_code, title: missionData.title },
-          newStatus,
-          confirmedCount: newStatus === 'CONFIRMED' ? confirmedCount + 1 : confirmedCount,
-          capacity,
-          waitlistCount: newStatus === 'WAITLIST' ? waitlistCount + 1 : waitlistCount,
-          waitingList: waitingList || 0,
-          name: storedName,
+        // ─── 13. Outbox: capacity notifications (core reached / waitlist full / mission complete) ───
+        if (missionData.telegram_notifications === 1) {
+          try {
+            const chatId = (c.env.ADMIN_CHAT_IDS || '').split(',')[0].trim();
+            if (chatId && newStatus !== 'REJECTED') {
+              const confirmed = newStatus === 'CONFIRMED' ? confirmedCount + 1 : confirmedCount;
+              const wl = newStatus === 'WAITLIST' ? waitlistCount + 1 : waitlistCount;
+
+              let text = '';
+              let emoji = '';
+              if (newStatus === 'CONFIRMED' && confirmed >= capacity && wl > 0) {
+                emoji = '⚠️';
+                text = `${emoji} <b>العدد الأساسي كتمل!</b>\n\nالمهمة: ${missionData.title} (${missionData.public_code})\nالعدد الأساسي: ${capacity} ✅ مكتمل\nانتظار: ${wl} مقعد متاح\n\nتم فتح قائمة الانتظار. المتطوع الجديد هيبقى في الانتظار.`;
+              } else if (newStatus === 'WAITLIST' && wl >= (waitingList || 0)) {
+                emoji = '🔴';
+                text = `${emoji} <b>العدد كتمل بالكامل!</b>\n\nالمهمة: ${missionData.title} (${missionData.public_code})\nالعدد الأساسي: ${capacity} ✅\nقائمة الانتظار: ${waitingList} ✅ مكتملة\n\n⚠️ لا يوجد مقاعد متاحة. التسجيل هيترفض.`;
+              } else if (confirmed >= capacity && wl >= (waitingList || 0)) {
+                emoji = '🏆';
+                text = `${emoji} <b>اكتملت المهمة بالكامل!</b>\n\nالمهمة: ${missionData.title} (${missionData.public_code})\nالعدد الأساسي: ${capacity} ✅\nالانتظار: ${waitingList} ✅\nالاجمالي: ${capacity + (waitingList || 0)} متطوع\n\n📊 لعرض الاحصاءات: /missions`;
+              }
+              if (text) {
+                await createNotificationEvent(c.env.DB, {
+                  eventType: 'CAPACITY',
+                  registrationId,
+                  missionId: missionData.id,
+                  adminChatId: chatId,
+                  payload: JSON.stringify({ text, chat_id: chatId, keyboard: [] }),
+                });
+              }
+            }
+          } catch (outboxErr) {
+            console.error('[OUTBOX] Failed to queue capacity notification:', outboxErr);
+          }
         }
-      ).catch(err => console.error('Capacity notification failed:', err));
-    }
 
-  } catch (err: any) {
+        return success(c, {
+              registration_id: registrationId,
+              status: newStatus,
+              seat_number: seatNumber,
+              waitlist_position: waitlistPosition,
+              registration_sequence: nextSeq,
+              member_id: member_id,
+              name: storedName,
+              mission: {
+                public_code: missionData.public_code,
+                title: missionData.title,
+                capacity: capacity,
+                waiting_list: waitingList,
+                confirmed: newStatus === 'CONFIRMED' ? confirmedCount + 1 : confirmedCount,
+                available: Math.max(0, capacity - (newStatus === 'CONFIRMED' ? confirmedCount + 1 : confirmedCount)),
+                waitlist_available: Math.max(0, (waitingList || 0) - waitlistCount),
+                telegram_notifications: missionData.telegram_notifications,
+              },
+              message: newStatus === 'CONFIRMED' 
+                ? `تم تأكيد تسجيلك بنجاح! رقم مقعدك: ${seatNumber}`
+                : newStatus === 'WAITLIST'
+                  ? `اكتملت المقاعد المتاحة. تم إضافتك إلى قائمة الانتظار برقم: ${waitlistPosition}`
+                  : `عذراً، تم الوصول للسعة القصوى لهذه المهمة. التسجيل مغلق.`,
+            }, 201);
+      } catch (err: any) {
     console.error('Registration error:', err);
     // Handle SQL unique constraint violations gracefully
     if (err?.message?.includes('UNIQUE constraint failed')) {

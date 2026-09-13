@@ -63,4 +63,37 @@ app.onError((err, c) => {
   return error(c, 'INTERNAL_ERROR', 'Internal server error', 500);
 });
 
-export default app;
+// ─── Scheduled Notification Processor ─────────────────────────
+// Cloudflare Workers runs this on the cron trigger defined in wrangler.toml.
+// It drains the notification_events outbox and sends Telegram messages with retry/backoff.
+async function scheduled(
+  controller: any,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> {
+  const { processPendingNotifications } = await import('./services/notification_outbox');
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const adminChatIds = env.ADMIN_CHAT_IDS;
+
+  if (!token || !adminChatIds) {
+    console.log('[NOTIFICATION PROCESSOR] Missing token or adminChatIds');
+    return;
+  }
+
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const result = await processPendingNotifications(env.DB, token, adminChatIds);
+        console.log(`[NOTIFICATION PROCESSOR] sent=${result.sent} failed=${result.failed} retried=${result.retried}`);
+      } catch (error) {
+        console.error('[NOTIFICATION PROCESSOR] Error:', error);
+      }
+    })()
+  );
+}
+
+// Cloudflare Workers ES Module format requires both handlers in default export
+export default {
+  fetch: app.fetch,
+  scheduled,
+};

@@ -22,9 +22,9 @@ export const updateMissionSchema = z.object({
   capacity: z.number().int().positive().max(10000).optional(),
   waiting_list: z.number().int().min(0).max(1000).optional(),
   telegram_notifications: z.number().int().min(0).max(1).optional(),
-  status: z.enum(['DRAFT', 'OPEN', 'CLOSED', 'CANCELLED', 'COMPLETED']).optional(),
+  status: z.enum(['DRAFT', 'OPEN', 'CLOSED', 'CANCELLED', 'COMPLETED', 'REJECTED']).optional(),
   registration_open_at: z.string().datetime().optional(),
-  registration_close_at: z.string().datetime().optional(),
+  registration_close_at: z.string().datetime().nullable().optional(),
 });
 
 export const loginSchema = z.object({
