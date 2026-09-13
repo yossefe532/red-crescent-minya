@@ -8,30 +8,66 @@ import { escapeHtml } from './bot';
 // ─── Main Menu ─────────────────────────────────────────────────
 export function mainMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text('📋 المهمات', 'nav:missions')
-    .text('🟢 النشطة', 'nav:missions:active')
+    .text('📋 المهام', 'nav:missions')
+    .text('➕ إنشاء مهمة', 'nav:create')
     .row()
-    .text('➕ مهمة جديدة', 'nav:create')
-    .text('📊 إحصائيات', 'nav:stats')
+    .text('👥 المتطوعون', 'nav:volunteers')
+    .text('🔍 البحث', 'nav:search')
     .row()
-    .text('🔔 الإشعارات', 'nav:notifications')
-    .text('❤️ حالة النظام', 'nav:health')
+    .text('📊 الإحصائيات', 'nav:stats')
+    .text('🏥 فحص النظام', 'nav:health')
     .row()
-    .text('❓ مساعدة', 'nav:help');
+    .text('❓ المساعدة', 'nav:help');
 }
 
-// ─── Mission List Item ─────────────────────────────────────────
-export function missionListKeyboard(missionId: string, status: string): InlineKeyboard {
+// ─── Public User Menu ──────────────────────────────────────────
+export function publicUserKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .url('🌐 بوابة التسجيل في المهام', 'https://red-crescent-minya.pages.dev')
+    .row()
+    .text('❓ معلومات ومساعدة', 'nav:help_public');
+}
+
+// ─── Mission List Keyboard ─────────────────────────────────────
+export function missionListKeyboard(
+  missions: Array<{ id: string; public_code: string; title: string; status?: string }>,
+  page: number,
+  totalPages: number,
+  filter: string
+): InlineKeyboard {
   const kb = new InlineKeyboard();
-  kb.text('📄 التفاصيل', `m:detail_pub:${missionId}`);
-  kb.text('👥 المتطوعين', `m:regs:${missionId}`);
-  kb.row();
-  if (status === 'OPEN') {
-    kb.text('🔒 إغلاق', `m:close:${missionId}`);
-  } else if (status === 'DRAFT' || status === 'CLOSED') {
-    kb.text('🔓 فتح', `m:open:${missionId}`);
+
+  // Filter tabs
+  const allTag = filter === 'ALL' ? '• الكل •' : 'الكل';
+  const openTag = filter === 'OPEN' ? '• المفتوحة 🟢 •' : 'المفتوحة 🟢';
+  const closedTag = filter === 'CLOSED' ? '• المغلقة 🔴 •' : 'المغلقة 🔴';
+
+  kb.text(allTag, 'm:page:ALL:1')
+    .text(openTag, 'm:page:OPEN:1')
+    .text(closedTag, 'm:page:CLOSED:1')
+    .row();
+
+  // Missions buttons
+  for (const m of missions) {
+    const statusIcon = m.status === 'OPEN' ? '🟢' : m.status === 'CLOSED' ? '🔴' : '📝';
+    kb.text(`${statusIcon} ${m.public_code} — ${escapeHtml(m.title)}`, `m:detail:${m.id}`).row();
   }
-  kb.text('🔗 رابط', `m:link:${missionId}`);
+
+  // Pagination
+  if (totalPages > 1) {
+    if (page > 1) {
+      kb.text('◀️ السابق', `m:page:${filter}:${page - 1}`);
+    }
+    kb.text(`${page} / ${totalPages}`, 'noop');
+    if (page < totalPages) {
+      kb.text('التالي ▶️', `m:page:${filter}:${page + 1}`);
+    }
+    kb.row();
+  }
+
+  kb.text('➕ إنشاء مهمة جديدة', 'nav:create')
+    .text('🏠 الرئيسية', 'nav:home');
+
   return kb;
 }
 
@@ -39,31 +75,36 @@ export function missionListKeyboard(missionId: string, status: string): InlineKe
 export function missionDetailKeyboard(missionId: string, status: string): InlineKeyboard {
   const kb = new InlineKeyboard();
 
-  // Status toggle
+  // Status toggle — strictly valid actions only
   if (status === 'OPEN') {
-    kb.text('🔒 إغلاق التسجيل', `m:close:${missionId}`);
-  } else if (status === 'DRAFT' || status === 'CLOSED') {
-    kb.text('🔓 فتح التسجيل', `m:open:${missionId}`);
+    kb.text('🔒 إغلاق المهمة', `m:close:${missionId}`);
+  } else if (status === 'CLOSED') {
+    kb.text('🔓 إعادة فتح المهمة', `m:reopen:${missionId}`);
+  } else if (status === 'DRAFT') {
+    kb.text('🟢 فتح التسجيل', `m:reopen:${missionId}`);
   }
   kb.row();
 
   // Registrant views
-  kb.text('👥 المتطوعين', `m:regs:${missionId}`)
-    .text('⏳ الانتظار', `m:wait:${missionId}`)
+  kb.text('👥 المتطوعون', `m:regs:${missionId}`)
+    .text('⏳ الانتظار', `m:waitlist:${missionId}`)
     .row();
 
-  // Management
+  // Management & links
   kb.text('✏️ تعديل', `m:edit:${missionId}`)
-    .text('📲 واتساب', `m:whatsapp:${missionId}`)
+    .text('🔗 رابط التسجيل', `m:link:${missionId}`)
     .row();
 
-  kb.text('🔗 رابط التسجيل', `m:link:${missionId}`)
+  kb.text('📲 واتساب', `m:whatsapp:${missionId}`)
     .text('📥 تصدير CSV', `m:export:${missionId}`)
     .row();
 
-  kb.text('🗑️ حذف', `m:delete:${missionId}`)
-    .text('🏠 الرئيسية', 'nav:home')
+  kb.text('🗑️ حذف المهمة', `m:delete:${missionId}`)
+    .text('🔔 الإشعارات', `m:notify_toggle:${missionId}`)
     .row();
+
+  kb.text('⬅️ قائمة المهام', 'nav:missions')
+    .text('🏠 الرئيسية', 'nav:home');
 
   return kb;
 }
@@ -78,13 +119,13 @@ export function volunteerActionsKeyboard(
   const kb = new InlineKeyboard();
 
   if (hasAudio) {
-    kb.text('🎙️ التسجيل الصوتي', `v:audio:${regId}`).row();
+    kb.text('🎙️ تشغيل التسجيل', `v:audio:${regId}`).row();
   }
 
   if (status === 'CONFIRMED') {
-    kb.text('🔄 نقل للانتظار', `v:move:${regId}:WAITLIST`);
+    kb.text('⏳ نقل لقائمة الانتظار', `v:demote:${regId}`);
   } else if (status === 'WAITLIST') {
-    kb.text('✅ تأكيد', `v:move:${regId}:CONFIRMED`);
+    kb.text('✅ ترقية لمقعد مؤكد', `v:promote:${regId}`);
   }
 
   if (status !== 'CANCELLED') {
@@ -92,8 +133,11 @@ export function volunteerActionsKeyboard(
   }
   kb.row();
 
-  kb.text('👥 كل المسجلين', `m:regs:${missionId}`)
-    .text('🏠 الرئيسية', 'nav:home');
+  kb.text('👥 قائمة المتطوعين', `m:regs:${missionId}`)
+    .text('📄 تفاصيل المهمة', `m:detail:${missionId}`)
+    .row();
+
+  kb.text('🏠 الرئيسية', 'nav:home');
 
   return kb;
 }
@@ -101,52 +145,51 @@ export function volunteerActionsKeyboard(
 // ─── Create Wizard ─────────────────────────────────────────────
 export function skipButtonKeyboard(action: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('⏭️ تخطي', `wiz:skip:${action}`)
-    .text('❌ إلغاء', 'wiz:cancel');
+    .text('⏭️ تخطي', `wiz:create:skip:${action}`)
+    .text('❌ إلغاء', 'wiz:create:cancel');
 }
 
 export function cancelWizardKeyboard(): InlineKeyboard {
-  return new InlineKeyboard().text('❌ إلغاء', 'wiz:cancel');
+  return new InlineKeyboard().text('❌ إلغاء', 'wiz:create:cancel');
 }
 
 export function createConfirmKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text('✅ إنشاء المهمة', 'wiz:confirm:create')
+    .text('✅ إنشاء المهمة', 'wiz:create:confirm')
     .row()
-    .text('✏️ تعديل', 'wiz:restart')
-    .text('❌ إلغاء', 'wiz:cancel');
+    .text('❌ إلغاء', 'wiz:create:cancel');
 }
 
 // ─── Confirmation Dialog ───────────────────────────────────────
 export function confirmActionKeyboard(action: string, entityId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('✅ تأكيد', `confirm:${action}:${entityId}`)
+    .text('✅ تأكيد التنفيذ', `confirm:${action}:${entityId}`)
     .text('❌ إلغاء', 'nav:home');
 }
 
 // ─── Edit Mission Field Selection ──────────────────────────────
 export function editFieldKeyboard(missionId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('📝 الاسم', `edit:field:${missionId}:title`)
-    .text('📄 الوصف', `edit:field:${missionId}:description`)
+    .text('📝 الاسم', `edit:field:title:${missionId}`)
+    .text('📄 الوصف', `edit:field:description:${missionId}`)
     .row()
-    .text('📍 المقر', `edit:field:${missionId}:location`)
-    .text('👥 السعة', `edit:field:${missionId}:capacity`)
+    .text('📍 المقر', `edit:field:location:${missionId}`)
+    .text('👥 السعة', `edit:field:capacity:${missionId}`)
     .row()
-    .text('📅 البداية', `edit:field:${missionId}:start_at`)
-    .text('📅 النهاية', `edit:field:${missionId}:end_at`)
+    .text('📅 البداية', `edit:field:start_at:${missionId}`)
+    .text('📅 النهاية', `edit:field:end_at:${missionId}`)
     .row()
-    .text('⏳ الانتظار', `edit:field:${missionId}:waiting_list`)
-    .text('🔙 رجوع', `m:detail_pub:${missionId}`);
+    .text('⏳ الانتظار', `edit:field:waiting_list:${missionId}`)
+    .text('🔙 رجوع للتفاصيل', `m:detail:${missionId}`);
 }
 
 // ─── Notification Settings ─────────────────────────────────────
 export function notificationSettingsKeyboard(isOn: boolean): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (isOn) {
-    kb.text('🔴 إيقاف الإشعارات', 'notify:off');
+    kb.text('🔴 إيقاف الإشعارات', 'notify:toggle:off');
   } else {
-    kb.text('🟢 تشغيل الإشعارات', 'notify:on');
+    kb.text('🟢 تشغيل الإشعارات', 'notify:toggle:on');
   }
   kb.row().text('🏠 الرئيسية', 'nav:home');
   return kb;
@@ -155,7 +198,7 @@ export function notificationSettingsKeyboard(isOn: boolean): InlineKeyboard {
 // ─── Back Buttons ──────────────────────────────────────────────
 export function backToMissionKeyboard(missionId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('📄 التفاصيل', `m:detail_pub:${missionId}`)
+    .text('📄 تفاصيل المهمة', `m:detail:${missionId}`)
     .text('🏠 الرئيسية', 'nav:home');
 }
 
@@ -171,9 +214,106 @@ export function missionPickerKeyboard(
   const kb = new InlineKeyboard();
   for (const m of missions) {
     const statusIcon = m.status === 'OPEN' ? '🟢' : m.status === 'CLOSED' ? '🔴' : '📝';
-    // Use m:detail_pub:<id> so the callback handler can look up by ID
-    kb.text(`${statusIcon} ${m.public_code} — ${escapeHtml(m.title)}`, `m:detail_pub:${m.id}`).row();
+    kb.text(`${statusIcon} ${m.public_code} — ${escapeHtml(m.title)}`, `${callbackPrefix}:${m.id}`).row();
   }
   kb.text('❌ إلغاء', 'nav:home');
+  return kb;
+}
+
+// ─── Member Search ────────────────────────────────────────────
+export function memberSearchKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('🔢 بحث برقم العضوية', 'search:prompt:member_id')
+    .text('📝 بحث بالاسم', 'search:prompt:name')
+    .row()
+    .text('🏠 الرئيسية', 'nav:home');
+}
+
+export function memberSearchResultKeyboard(
+  results: Array<{ regId: string; name: string; memberId: string; missionCode: string; status: string }>,
+  page: number,
+  totalPages: number
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const r of results) {
+    const statusIcon = r.status === 'CONFIRMED' ? '✅' : r.status === 'WAITLIST' ? '⏳' : '❌';
+    kb.text(`${statusIcon} ${r.name} (${r.memberId}) — ${r.missionCode}`, `v:detail:${r.regId}`).row();
+  }
+  if (totalPages > 1) {
+    if (page > 1) kb.text('◀️ السابق', `search:page:${page - 1}`);
+    kb.text(`${page} / ${totalPages}`, 'noop');
+    if (page < totalPages) kb.text('التالي ▶️', `search:page:${page + 1}`);
+    kb.row();
+  }
+  kb.text('🔍 بحث جديد', 'nav:search')
+    .text('🏠 الرئيسية', 'nav:home');
+  return kb;
+}
+
+// ─── All Volunteers List ──────────────────────────────────────
+export function allVolunteersKeyboard(
+  volunteers: Array<{ regId: string; name: string; memberId: string; missionCode: string; status: string }>,
+  page: number,
+  totalPages: number,
+  statusFilter: string = 'ALL'
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  // Status filter tabs
+  const allTag = statusFilter === 'ALL' ? '• الكل •' : 'الكل';
+  const confirmedTag = statusFilter === 'CONFIRMED' ? '• ✅ مؤكد •' : '✅ مؤكد';
+  const waitlistTag = statusFilter === 'WAITLIST' ? '• ⏳ انتظار •' : '⏳ انتظار';
+  const rejectedTag = statusFilter === 'REJECTED' ? '• 🚫 مرفوض •' : '🚫 مرفوض';
+  kb.text(allTag, 'vol:filter:ALL')
+    .text(confirmedTag, 'vol:filter:CONFIRMED')
+    .row()
+    .text(waitlistTag, 'vol:filter:WAITLIST')
+    .text(rejectedTag, 'vol:filter:REJECTED')
+    .row();
+
+  for (const v of volunteers) {
+    const statusIcon = v.status === 'CONFIRMED' ? '✅' : v.status === 'WAITLIST' ? '⏳' : v.status === 'REJECTED' ? '🚫' : '❌';
+    kb.text(`${statusIcon} ${v.name} (${v.memberId})`, `v:detail:${v.regId}`).row();
+  }
+  if (totalPages > 1) {
+    if (page > 1) kb.text('◀️ السابق', `vol:page:${page - 1}:${statusFilter}`);
+    kb.text(`${page} / ${totalPages}`, 'noop');
+    if (page < totalPages) kb.text('التالي ▶️', `vol:page:${page + 1}:${statusFilter}`);
+    kb.row();
+  }
+  kb.text('🏠 الرئيسية', 'nav:home');
+  return kb;
+}
+
+
+// ─── Activity Feed ──────────────────────────────────────────
+export function activityFeedKeyboard(
+  events: Array<{ id: string; action: string; entityType: string }>,
+  page: number,
+  totalPages: number
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  if (totalPages > 1) {
+    if (page > 1) kb.text('◀️ السابق', `act:page:${page - 1}`);
+    kb.text(`${page} / ${totalPages}`, 'noop');
+    if (page < totalPages) kb.text('التالي ▶️', `act:page:${page + 1}`);
+    kb.row();
+  }
+  kb.text('🔄 تحديث', 'nav:activity')
+    .text('🏠 الرئيسية', 'nav:home');
+  return kb;
+}
+
+// ─── Mission Notification Toggle ──────────────────────────────
+export function missionNotificationToggleKeyboard(missionId: string, isOn: boolean): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  if (isOn) {
+    kb.text('🔴 إيقاف إشعارات هذه المهمة', `m:notify_toggle:${missionId}`);
+  } else {
+    kb.text('🟢 تشغيل إشعارات هذه المهمة', `m:notify_toggle:${missionId}`);
+  }
+  kb.row()
+    .text('📄 تفاصيل المهمة', `m:detail:${missionId}`)
+    .text('🏠 الرئيسية', 'nav:home');
   return kb;
 }

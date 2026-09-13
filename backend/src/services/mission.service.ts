@@ -42,7 +42,15 @@ export async function createMission(db: D1Database, data: Record<string, unknown
   console.log('Creating mission with data:', data);
   
   const id = generateUUID();
-  const publicCode = generateMissionCode();
+  // Generate unique public_code with collision retry (UPPER case for consistency)
+  let publicCode = generateMissionCode();
+  let attempts = 0;
+  while (attempts < 5) {
+    const existing = await db.prepare('SELECT id FROM missions WHERE public_code = ?').bind(publicCode).first();
+    if (!existing) break;
+    publicCode = generateMissionCode();
+    attempts++;
+  }
   const now = new Date().toISOString();
   const confirmationPhrase = `أؤكد مشاركتي في مهمة ${publicCode}`;
   
@@ -169,11 +177,23 @@ export async function updateMission(db: D1Database, id: string, data: Record<str
 
 export async function deleteMission(db: D1Database, id: string): Promise<boolean> {
   try {
-    // First delete all registrations (with their audio) to avoid orphan rows / FK errors
-    await db.prepare('DELETE FROM registrations WHERE mission_id = ?').bind(id).run();
-    // Also delete any audit log entries referencing this mission
-    await db.prepare(`DELETE FROM audit_logs WHERE metadata LIKE ?`).bind(`%${id}%`).run();
+    // 1. Delete notification_events for this mission
+    await db.prepare('DELETE FROM notification_events WHERE mission_id = ?').bind(id).run();
 
+    // 2. Delete audio_confirmations for registrations of this mission
+    await db.prepare(
+      `DELETE FROM audio_confirmations WHERE registration_id IN (SELECT id FROM registrations WHERE mission_id = ?)`
+    ).bind(id).run();
+
+    // 3. Delete registrations
+    await db.prepare('DELETE FROM registrations WHERE mission_id = ?').bind(id).run();
+
+    // 4. Delete temporary_registrations
+    await db.prepare('DELETE FROM temporary_registrations WHERE mission_id = ?').bind(id).run();
+
+    // 5. RETAIN audit_logs for historical audit trail (do NOT delete)
+
+    // 6. Delete the mission itself
     const result = await db.prepare('DELETE FROM missions WHERE id = ?').bind(id).run();
     return ((result.meta as any)?.changes || 0) > 0 || (result as any)?.success === true;
   } catch (error) {

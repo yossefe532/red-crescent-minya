@@ -1,20 +1,40 @@
 /**
  * Telegram Webhook — Thin Router
- * All logic lives in ../telegram/* modules. This file just routes.
+ * All logic lives in ../telegram/* modules. This file routes webhook updates.
  */
 import { Hono } from 'hono';
-import { isAuthorizedChat, tgSend, tgAnswerCb, clearSession } from '../telegram/bot';
-import { mainMenuKeyboard } from '../telegram/keyboards';
+import { tgSend, tgAnswerCb } from '../telegram/bot';
+import { requireAdmin, isAdmin } from '../telegram/auth';
+import { mainMenuKeyboard, publicUserKeyboard } from '../telegram/keyboards';
 import { parseIntent } from '../telegram/intent';
 import { handleCallbackQuery } from '../telegram/callbacks';
 import { handleWizardMessage } from '../telegram/wizard';
-import { startCommandHandler, helpCommandHandler, cancelCommandHandler } from '../telegram/commands/start';
-import { handleListMissions, handleStats, handleMissionDetail, handleGetLink, handleWhatsAppMessage, handleExportCSV } from '../telegram/commands/missions';
+import {
+  startCommandHandler,
+  helpCommandHandler,
+  cancelCommandHandler,
+} from '../telegram/commands/start';
+import {
+  handleListMissions,
+  handleStats,
+  handleHealth,
+  handleMissionDetail,
+  handleGetLink,
+  handleWhatsAppMessage,
+  handleExportCSV,
+  handleMissionSelectForRegistrants,
+} from '../telegram/commands/missions';
 import { startCreateWizard } from '../telegram/commands/create';
-import { handleToggleRegistration } from '../telegram/commands/toggle';
 import { startDeleteWizard } from '../telegram/commands/delete';
-import { handleRegistrants, handleWaitlist, handleVolunteerDetail } from '../telegram/commands/registrants';
+import { handleCloseMission } from '../telegram/commands/close';
+import { handleReopenMission } from '../telegram/commands/reopen';
+import {
+  handleRegistrants,
+  handleWaitlist,
+  handleVolunteerDetail,
+} from '../telegram/commands/registrants';
 import { startCancelWizard } from '../telegram/commands/cancel-reg';
+import { getMissionByPublicCode } from '../services/mission.service';
 import { Env } from '../env';
 
 // ─── Router ────────────────────────────────────────────────────
@@ -41,6 +61,7 @@ telegramRoutes.post('/setWebhook', async (c) => {
 telegramRoutes.post('/', async (c) => {
   const { DB, TELEGRAM_BOT_TOKEN, ADMIN_CHAT_IDS, AI } = c.env;
   const token = TELEGRAM_BOT_TOKEN || '';
+  const adminChatIds = ADMIN_CHAT_IDS || '';
 
   try {
     const update = await c.req.json();
@@ -53,18 +74,10 @@ telegramRoutes.post('/', async (c) => {
       return c.json({ ok: true });
     }
 
-    // Authorization
-    if (!isAuthorizedChat(chatId, ADMIN_CHAT_IDS)) {
-      await tgSend(token, chatId, '⛔ غير مصرح لك باستخدام هذا البوت.');
-      return c.json({ ok: true });
-    }
-
     // ── Callback queries ───────────────────────────────────────
     if (update.callback_query) {
       const cb = update.callback_query;
-      const data = cb.data as string;
-      await tgAnswerCb(token, cb.id);
-      await handleCallbackQuery(token, chatId, DB, cb);
+      await handleCallbackQuery(token, chatId, DB, cb, adminChatIds);
       return c.json({ ok: true });
     }
 
@@ -72,19 +85,63 @@ telegramRoutes.post('/', async (c) => {
     if (update.message?.text) {
       const text = update.message.text.trim();
 
-      // Commands first
+      // Commands first (handling @botname suffixes as well)
       if (text.startsWith('/')) {
-        const cmd = text.split(' ')[0].toLowerCase();
-        if (cmd === '/start')  { await startCommandHandler(token, chatId, DB); return c.json({ ok: true }); }
-        if (cmd === '/help')   { await helpCommandHandler(token, chatId, DB); return c.json({ ok: true }); }
-        if (cmd === '/cancel') { await cancelCommandHandler(token, chatId, DB); return c.json({ ok: true }); }
+        const rawCmd = text.split(' ')[0].toLowerCase();
+        const cmd = rawCmd.split('@')[0];
+
+        if (cmd === '/start') {
+          await startCommandHandler(token, chatId, DB, adminChatIds);
+          return c.json({ ok: true });
+        }
+        if (cmd === '/help') {
+          await helpCommandHandler(token, chatId, DB, adminChatIds);
+          return c.json({ ok: true });
+        }
+        if (cmd === '/cancel') {
+          await cancelCommandHandler(token, chatId, DB, adminChatIds);
+          return c.json({ ok: true });
+        }
+
+        // Admin-only commands
+        if (cmd === '/missions') {
+          if (!await requireAdmin(token, chatId, DB, adminChatIds)) return c.json({ ok: true });
+          await handleListMissions(token, chatId, DB, 1, 'ALL');
+          return c.json({ ok: true });
+        }
+        if (cmd === '/create') {
+          if (!await requireAdmin(token, chatId, DB, adminChatIds)) return c.json({ ok: true });
+          await startCreateWizard(token, chatId, DB);
+          return c.json({ ok: true });
+        }
+        if (cmd === '/registrants' || cmd === '/volunteers') {
+          if (!await requireAdmin(token, chatId, DB, adminChatIds)) return c.json({ ok: true });
+          await handleMissionSelectForRegistrants(token, chatId, DB);
+          return c.json({ ok: true });
+        }
+        if (cmd === '/stats') {
+          if (!await requireAdmin(token, chatId, DB, adminChatIds)) return c.json({ ok: true });
+          await handleStats(token, chatId, DB);
+          return c.json({ ok: true });
+        }
+        if (cmd === '/health') {
+          if (!await requireAdmin(token, chatId, DB, adminChatIds)) return c.json({ ok: true });
+          await handleHealth(token, chatId, DB);
+          return c.json({ ok: true });
+        }
+      }
+
+      // If user is not admin and sends regular text, give public guidance
+      if (!isAdmin(chatId, adminChatIds)) {
+        await startCommandHandler(token, chatId, DB, adminChatIds);
+        return c.json({ ok: true });
       }
 
       // Wizard state takes priority over intent parsing
       const wizardHandled = await handleWizardMessage(token, chatId, DB, text);
       if (wizardHandled) return c.json({ ok: true });
 
-      // Intent-based routing
+      // Intent-based fallback routing for admins
       const intent = await parseIntent(text, AI);
       switch (intent.intent) {
         case 'create_mission':
@@ -99,10 +156,10 @@ telegramRoutes.post('/', async (c) => {
           }
           break;
         case 'list_missions':
-          await handleListMissions(token, chatId, DB, c.env, false);
+          await handleListMissions(token, chatId, DB, 1, 'ALL');
           break;
         case 'list_active':
-          await handleListMissions(token, chatId, DB, c.env, true);
+          await handleListMissions(token, chatId, DB, 1, 'OPEN');
           break;
         case 'stats':
           await handleStats(token, chatId, DB);
@@ -112,48 +169,80 @@ telegramRoutes.post('/', async (c) => {
           if (code) {
             await handleGetLink(token, chatId, DB, code);
           } else {
-            await startDeleteWizard(token, chatId, DB); // start picker
+            await handleListMissions(token, chatId, DB, 1, 'ALL');
           }
           break;
         }
         case 'export_csv':
-          await handleExportCSV(token, chatId, DB, intent.extracted.missionCode || '');
+          if (intent.extracted.missionCode) {
+            await handleExportCSV(token, chatId, DB, intent.extracted.missionCode);
+          } else {
+            await handleListMissions(token, chatId, DB, 1, 'ALL');
+          }
           break;
         case 'help':
-          await helpCommandHandler(token, chatId, DB);
+          await helpCommandHandler(token, chatId, DB, adminChatIds);
           break;
         case 'view_registrants':
-          await handleRegistrants(token, chatId, DB, intent.extracted.missionCode || '');
+          if (intent.extracted.missionCode) {
+            await handleRegistrants(token, chatId, DB, intent.extracted.missionCode);
+          } else {
+            await handleMissionSelectForRegistrants(token, chatId, DB);
+          }
           break;
         case 'view_waitlist':
-          await handleWaitlist(token, chatId, DB, intent.extracted.missionCode || '');
+          if (intent.extracted.missionCode) {
+            await handleWaitlist(token, chatId, DB, intent.extracted.missionCode);
+          } else {
+            await handleMissionSelectForRegistrants(token, chatId, DB);
+          }
           break;
         case 'cancel_registration':
-          await startCancelWizard(token, chatId, DB, intent.extracted.missionCode || intent.extracted.missionHint);
+          await startCancelWizard(
+            token,
+            chatId,
+            DB,
+            intent.extracted.missionCode || intent.extracted.missionHint
+          );
           break;
         case 'delete_mission':
-          await startDeleteWizard(token, chatId, DB, intent.extracted.missionCode || intent.extracted.missionHint);
+          await startDeleteWizard(
+            token,
+            chatId,
+            DB,
+            intent.extracted.missionCode || intent.extracted.missionHint
+          );
           break;
         case 'close_mission': {
           const code = intent.extracted.missionCode || intent.extracted.missionHint;
           if (code) {
-            await startDeleteWizard(token, chatId, DB, code); // picker will resolve
+            const mission = await getMissionByPublicCode(DB, code);
+            if (mission) await handleCloseMission(token, chatId, DB, mission.id, chatId);
           } else {
-            await startDeleteWizard(token, chatId, DB);
+            await handleListMissions(token, chatId, DB, 1, 'OPEN');
           }
           break;
         }
-        case 'open_mission':
-          await startDeleteWizard(token, chatId, DB, intent.extracted.missionCode || intent.extracted.missionHint);
+        case 'open_mission': {
+          const code = intent.extracted.missionCode || intent.extracted.missionHint;
+          if (code) {
+            const mission = await getMissionByPublicCode(DB, code);
+            if (mission) await handleReopenMission(token, chatId, DB, mission.id, chatId);
+          } else {
+            await handleListMissions(token, chatId, DB, 1, 'CLOSED');
+          }
           break;
+        }
         default:
-          await tgSend(token, chatId, '❓ لم أفهم. اختر من القائمة:', { reply_markup: mainMenuKeyboard() });
+          await tgSend(token, chatId, '❓ لم أفهم الأمر. يرجى الاختيار من القائمة أدناه:', {
+            reply_markup: mainMenuKeyboard(),
+          });
       }
     }
 
     return c.json({ ok: true });
   } catch (err) {
     console.error('[TG] Webhook error:', err);
-    return c.json({ ok: true }); // Always 200 to Telegram
+    return c.json({ ok: true }); // Always return 200 to Telegram
   }
 });

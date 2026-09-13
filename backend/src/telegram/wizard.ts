@@ -67,6 +67,21 @@ export async function handleWizardMessage(
       );
       return true;
 
+    // ─── Search Input ─────────────────────────────────────────
+    case 'search_input': {
+      const searchData = session.data;
+      if (!searchData?.searchType) {
+        await tgSend(token, chatId, '❌ حدث خطأ. جرب من جديد.', {
+          reply_markup: mainMenuKeyboard(),
+        });
+        return true;
+      }
+      // Import and execute search
+      const { executeSearch } = await import('./callbacks');
+      await executeSearch(token, chatId, db, text, searchData.searchType as string, 1);
+      return true;
+    }
+
     // ─── Edit Mission Value ───────────────────────────────────
     case 'edit_value': {
       const { missionId, editField } = session.data;

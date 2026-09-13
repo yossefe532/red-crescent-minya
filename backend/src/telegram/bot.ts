@@ -5,12 +5,28 @@
 import { WizardState, WizardData, SessionRow } from './types';
 
 // ─── Telegram API Helpers ──────────────────────────────────────
+const TG_TIMEOUT_MS = 10000; // 10s timeout per Telegram API call
+
+async function tgFetch(
+  url: string,
+  options: RequestInit,
+  timeoutMs = TG_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 export async function tgSend(
   token: string,
   chatId: number,
   text: string,
   extra?: Record<string, unknown>
-): Promise<void> {
+): Promise<boolean> {
   const body: Record<string, unknown> = {
     chat_id: chatId,
     text,
@@ -20,17 +36,24 @@ export async function tgSend(
   if (body.reply_markup) {
     body.reply_markup = normalizeReplyMarkup(body.reply_markup);
   }
-  const res = await fetch(
-    `https://api.telegram.org/bot${token}/sendMessage`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+  try {
+    const res = await tgFetch(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error('tgSend failed', res.status, errText);
+      return false;
     }
-  );
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    console.error('tgSend failed', res.status, errText);
+    return true;
+  } catch (e) {
+    console.error('tgSend error:', e);
+    return false;
   }
 }
 
@@ -40,40 +63,52 @@ export async function tgEdit(
   messageId: number,
   text: string,
   extra?: Record<string, unknown>
-): Promise<void> {
-  await fetch(
-    `https://api.telegram.org/bot${token}/editMessageText`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_id: messageId,
-        text,
-        parse_mode: 'HTML',
-        ...extra,
-      }),
-    }
-  ).catch(console.error);
+): Promise<boolean> {
+  try {
+    const res = await tgFetch(
+      `https://api.telegram.org/bot${token}/editMessageText`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          text,
+          parse_mode: 'HTML',
+          ...extra,
+        }),
+      }
+    );
+    return res.ok;
+  } catch (e) {
+    console.error('tgEdit error:', e);
+    return false;
+  }
 }
 
 export async function tgAnswerCb(
   token: string,
   callbackQueryId: string,
   text?: string
-): Promise<void> {
-  await fetch(
-    `https://api.telegram.org/bot${token}/answerCallbackQuery`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        callback_query_id: callbackQueryId,
-        text,
-        show_alert: !!text,
-      }),
-    }
-  ).catch(console.error);
+): Promise<boolean> {
+  try {
+    const res = await tgFetch(
+      `https://api.telegram.org/bot${token}/answerCallbackQuery`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callback_query_id: callbackQueryId,
+          text,
+          show_alert: !!text,
+        }),
+      }
+    );
+    return res.ok;
+  } catch (e) {
+    console.error('tgAnswerCb error:', e);
+    return false;
+  }
 }
 
 export async function tgSendVoice(

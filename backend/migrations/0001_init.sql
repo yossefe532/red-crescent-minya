@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS missions (
     capacity        INTEGER NOT NULL CHECK(capacity > 0),
     confirmation_phrase TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'DRAFT'
-                    CHECK(status IN ('DRAFT', 'OPEN', 'CLOSED', 'CANCELLED', 'COMPLETED')),
+                  CHECK(status IN ('DRAFT', 'OPEN', 'CLOSED', 'CANCELLED', 'COMPLETED', 'REJECTED')),
     registration_open_at  TEXT,
     registration_close_at TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS registrations (
     mission_id              TEXT NOT NULL REFERENCES missions(id),
     volunteer_id            TEXT NOT NULL REFERENCES volunteers(id),
     status                  TEXT NOT NULL DEFAULT 'PENDING'
-                            CHECK(status IN ('PENDING', 'CONFIRMED', 'WAITLIST', 'CANCELLED')),
+                            CHECK(status IN ('PENDING', 'CONFIRMED', 'WAITLIST', 'CANCELLED', 'REJECTED')),
     seat_number             INTEGER,
     waitlist_position       INTEGER,
     registration_sequence   INTEGER NOT NULL,

@@ -23,7 +23,10 @@ export type WizardState =
   // Cancel registration
   | 'cancelreg_select_mission'
   | 'cancelreg_select_volunteer'
-  | 'cancelreg_confirm';
+  | 'cancelreg_confirm'
+  // Search
+  | 'search_input'
+  | 'search_results';
 
 export interface WizardData {
   title?: string;

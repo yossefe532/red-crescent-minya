@@ -88,9 +88,10 @@ export function formatVolunteerDetail(
   hasAudio: boolean,
   audioDurationSec: number
 ): string {
+  const volunteerName = reg.name || reg.volunteer_name || 'غير معروف';
   return `👤 <b>تفاصيل المتطوع</b>\n`
     + `━━━━━━━━━━━━━━━━━\n\n`
-    + `📝 <b>الاسم:</b> ${escapeHtml(reg.name)}\n`
+    + `📝 <b>الاسم:</b> ${escapeHtml(volunteerName)}\n`
     + `🏷️ <b>رقم العضوية:</b> ${reg.member_id}\n`
     + `📱 <b>التليفون:</b> ${reg.phone || 'غير مسجل'}\n`
     + `📅 <b>وقت التسجيل:</b> ${formatDate(reg.created_at)}\n`
@@ -209,6 +210,212 @@ export function buildWhatsAppMessage(mission: any): string {
     + `👥 العدد المطلوب: ${mission.capacity}\n\n`
     + `🔗 *سجّل من هنا:*\n${url}\n\n`
     + `⚠️ التسجيل الصوتي إلزامي لتأكيد المشاركة.`;
+}
+
+// ─── Search Results ──────────────────────────────────────────
+export function formatSearchResults(
+  query: string,
+  results: Array<{ name: string; member_id: string; mission_code: string; status: string; seat_number: number | null; waitlist_position: number | null }>,
+  total: number
+): string {
+  if (results.length === 0) {
+    return `🔍 <b>نتائج البحث</b>
+`
+      + `━━━━━━━━━━━━━━━━━
+
+`
+      + `❌ لا توجد نتائج للبحث: <b>${escapeHtml(query)}</b>`;
+  }
+  let msg = `🔍 <b>نتائج البحث:</b> "${escapeHtml(query)}"
+`
+    + `━━━━━━━━━━━━━━━━━
+
+`
+    + `📊 وجدت <b>${total}</b> نتيجة:
+
+`;
+  results.forEach((r, idx) => {
+    const statusIcon = r.status === 'CONFIRMED' ? '✅' : r.status === 'WAITLIST' ? '⏳' : '❌';
+    msg += `${idx + 1}. ${statusIcon} <b>${escapeHtml(r.name)}</b> (${r.member_id})
+`;
+    msg += `   📋 ${r.mission_code} — ${regStatusLabel(r.status)}`;
+    if (r.seat_number) msg += ` 💺#${r.seat_number}`;
+    if (r.waitlist_position) msg += ` ⏳#${r.waitlist_position}`;
+    msg += `
+
+`;
+  });
+  return msg;
+}
+
+// ─── All Volunteers ──────────────────────────────────────────
+export function formatAllVolunteers(
+  volunteers: Array<{ name: string; member_id: string; mission_code: string; status: string; created_at: string }>,
+  total: number,
+  page: number,
+  perPage: number
+): string {
+  const totalPages = Math.ceil(total / perPage);
+  let msg = `👥 <b>جميع المتطوعين</b>
+`
+    + `━━━━━━━━━━━━━━━━━
+
+`
+    + `📊 الإجمالي: <b>${total}</b> | الصفحة ${page}/${totalPages}
+
+`;
+  volunteers.forEach((v, idx) => {
+    const statusIcon = v.status === 'CONFIRMED' ? '✅' : v.status === 'WAITLIST' ? '⏳' : '❌';
+    msg += `${(page - 1) * perPage + idx + 1}. ${statusIcon} <b>${escapeHtml(v.name)}</b> (${v.member_id})
+`;
+    msg += `   📋 ${v.mission_code} — ${formatDateShort(v.created_at)}
+`;
+  });
+  return msg;
+}
+
+// ─── Enhanced Stats ──────────────────────────────────────────
+export function formatEnhancedStats(stats: {
+  totalMissions: number;
+  openMissions: number;
+  closedMissions: number;
+  totalRegistrations: number;
+  confirmed: number;
+  waitlist: number;
+  cancelled: number;
+  todayRegistrations: number;
+  mostActiveMissions: Array<{ title: string; public_code: string; count: number }>;
+}): string {
+  let msg = `📊 <b>إحصائيات النظام</b>
+`
+    + `━━━━━━━━━━━━━━━━━
+
+`
+    + `📋 <b>المهمات:</b>
+`
+    + `   الإجمالي: ${stats.totalMissions}
+`
+    + `   🟢 مفتوحة: ${stats.openMissions}
+`
+    + `   🔴 مغلقة: ${stats.closedMissions}
+
+`
+    + `📝 <b>التسجيلات:</b>
+`
+    + `   الإجمالي: ${stats.totalRegistrations}
+`
+    + `   ✅ مؤكدة: ${stats.confirmed}
+`
+    + `   ⏳ انتظار: ${stats.waitlist}
+`
+    + `   ❌ ملغاة: ${stats.cancelled}
+`
+    + `   📅 تسجيلات اليوم: ${stats.todayRegistrations}
+`;
+  if (stats.mostActiveMissions.length > 0) {
+    msg += `
+🏆 <b>المهمات الأكثر نشاطاً:</b>
+`;
+    stats.mostActiveMissions.forEach((m, idx) => {
+      msg += `   ${idx + 1}. ${escapeHtml(m.title)} (${m.public_code}) — ${m.count} مسجل
+`;
+    });
+  }
+  return msg;
+}
+
+
+// ─── Activity Feed ──────────────────────────────────────────
+const AUDIT_ACTION_ICON: Record<string, string> = {
+  REGISTRATION_CONFIRMED: '🆕',
+  REGISTRATION_WAITLISTED: '⏳',
+  REGISTRATION_CANCELLED: '❌',
+  REGISTRATION_OPENED: '🟢',
+  REGISTRATION_CLOSED: '🔒',
+  MISSION_CREATED: '📋',
+  MISSION_REOPENED: '🔓',
+  MISSION_CLOSED: '🔒',
+  MISSION_DELETED: '🗑️',
+  MISSION_UPDATED: '✏️',
+  MISSION_DETAILS_UPDATED: '✏️',
+  VOLUNTEER_CONFIRMED: '✅',
+  VOLUNTEER_WAITLISTED: '⏳',
+  NOTIFICATION_FAILED: '⚠️',
+};
+
+const AUDIT_ACTION_AR: Record<string, string> = {
+  REGISTRATION_CONFIRMED: 'تسجيل جديد مؤكد',
+  REGISTRATION_WAITLISTED: 'تسجيل في الانتظار',
+  REGISTRATION_CANCELLED: 'إلغاء تسجيل',
+  REGISTRATION_OPENED: 'فتح التسجيل',
+  REGISTRATION_CLOSED: 'إغلاق التسجيل',
+  MISSION_CREATED: 'إنشاء مهمة',
+  MISSION_REOPENED: 'إعادة فتح المهمة',
+  MISSION_CLOSED: 'إغلاق المهمة',
+  MISSION_DELETED: 'حذف مهمة',
+  MISSION_UPDATED: 'تعديل مهمة',
+  MISSION_DETAILS_UPDATED: 'تعديل تفاصيل المهمة',
+  VOLUNTEER_CONFIRMED: 'ترقية متطوع',
+  VOLUNTEER_WAITLISTED: 'تحويل متطوع للانتظار',
+  NOTIFICATION_FAILED: 'فشل إشعار',
+};
+
+export function formatActivityFeed(
+  events: Array<{
+    id: string;
+    action: string;
+    entity_type: string;
+    entity_id: string;
+    metadata: string | null;
+    created_at: string;
+  }>,
+  total: number,
+  page: number,
+  perPage: number
+): string {
+  const totalPages = Math.ceil(total / perPage);
+  if (!events.length) {
+    return `📡 <b>آخر النشاطات</b>\n━━━━━━━━━━━━━━━━━\n\n📭 لا توجد نشاطات مسجلة.`;
+  }
+
+  let msg = `📡 <b>آخر النشاطات</b>\n`
+    + `━━━━━━━━━━━━━━━━━\n`
+    + `📊 الإجمالي: <b>${total}</b> | الصفحة ${page}/${totalPages}\n\n`;
+
+  events.forEach((ev, idx) => {
+    const icon = AUDIT_ACTION_ICON[ev.action] || '📌';
+    const label = AUDIT_ACTION_AR[ev.action] || ev.action;
+    let meta: Record<string, any> = {};
+    try { meta = JSON.parse(ev.metadata || '{}'); } catch {}
+
+    const missionTitle = meta.name || meta.mission_public_code || '';
+    const volunteerName = meta.name || '';
+    const seatNum = meta.seat_number;
+    const waitlistNum = meta.waitlist_position;
+    const status = meta.status;
+
+    msg += `${icon} <b>${label}</b>\n`;
+    msg += `   🕐 ${formatDate(ev.created_at)}\n`;
+
+    if (ev.entity_type === 'registration' && volunteerName) {
+      msg += `   👤 ${escapeHtml(volunteerName)}\n`;
+    }
+    if (missionTitle) {
+      msg += `   📋 ${escapeHtml(missionTitle)}\n`;
+    }
+    if (seatNum) {
+      msg += `   💺 مقعد #${seatNum}\n`;
+    }
+    if (waitlistNum) {
+      msg += `   ⏳ انتظار #${waitlistNum}\n`;
+    }
+    if (status) {
+      msg += `   📊 ${regStatusLabel(status)}\n`;
+    }
+    msg += '\n';
+  });
+
+  return msg;
 }
 
 // ─── Create Mission Summary ────────────────────────────────────
