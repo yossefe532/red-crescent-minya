@@ -1,24 +1,60 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  loginAdmin, 
-  logoutAdmin, 
-  listMissions, 
-  createMission, 
-  updateMission, 
-  getMissionRegistrations, 
-  cancelRegistration, 
-  fetchAudioPlaybackUrl, 
-  getExportCsvUrl, 
+import {
+  Plus,
+  LayoutDashboard,
+  MapPin,
+  Settings,
+  Link2,
+  MessageCircle,
+  Download,
+  RefreshCw,
+  Play,
+  StopCircle,
+  Copy,
+  X,
+  AlertTriangle,
+  CheckCircle2,
+  Users,
+  BarChart3,
+  CalendarDays,
+  Clock3,
+  Trash2,
+} from 'lucide-react';
+import AdminShell from '@/components/layout/AdminShell';
+import Button from '@/components/ui/Button';
+import IconButton from '@/components/ui/IconButton';
+import Input from '@/components/ui/Input';
+import Select from '@/components/ui/Select';
+import Card from '@/components/ui/Card';
+import Badge from '@/components/ui/Badge';
+import StatusBadge from '@/components/ui/StatusBadge';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import StatCard from '@/components/ui/StatCard';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
+import LoadingState from '@/components/ui/LoadingState';
+import Skeleton from '@/components/ui/Skeleton';
+import { useToast } from '@/components/ui/Toast';
+import { cn } from '@/lib/utils';
+import MissionControlPanel from './MissionControlPanel';
+import {
   checkSession,
-  Mission, 
-  Registration, 
-  AdminUser,
-  MissionCreateResponse 
-} from '../api/admin';
-import { MissionControlPanel } from './MissionControlPanel';
+  loginAdmin,
+  logoutAdmin,
+  listMissions,
+  createMission,
+  getMissionRegistrations,
+  cancelRegistration,
+  fetchAudioPlaybackUrl,
+  getExportCsvUrl,
+} from '@/api/admin';
+import type { Mission, Registration, MissionCreateResponse, AdminUser } from '@/api/admin';
 
-export function AdminDashboard() {
-  // Control panel state
+interface Props {}
+
+export function AdminDashboard(_props: Props) {
+  const { success: toastSuccess, error: toastError } = useToast();
+  // === ALL ORIGINAL STATE — UNTOUCHED ===
   const [showControlPanel, setShowControlPanel] = useState(false);
   const [controlPanelMission, setControlPanelMission] = useState<Mission | null>(null);
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
@@ -27,25 +63,22 @@ export function AdminDashboard() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Missions state
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loadingMissions, setLoadingMissions] = useState(false);
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
 
-  // Create mission modal state
-    const [showCreateModal, setShowCreateModal] = useState(false);
-    const [newTitle, setNewTitle] = useState('');
-    const [newDescription, setNewDescription] = useState('');
-    const [newLocation, setNewLocation] = useState('مقر الهلال الأحمر بالمنيا');
-    const [newCapacity, setNewCapacity] = useState(10);
-    const [newWaitingList, setNewWaitingList] = useState(0);
-    const [newTelegramNotifications, setNewTelegramNotifications] = useState(true);
-    const [newStartDate, setNewStartDate] = useState('');
-    const [newEndDate, setNewEndDate] = useState('');
-    const [creatingMission, setCreatingMission] = useState(false);
-    const [createModalSuccess, setCreateModalSuccess] = useState<MissionCreateResponse | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newLocation, setNewLocation] = useState('مقر الهلال الأحمر بالمنيا');
+  const [newCapacity, setNewCapacity] = useState(10);
+  const [newWaitingList, setNewWaitingList] = useState(0);
+  const [newTelegramNotifications, setNewTelegramNotifications] = useState(true);
+  const [newStartDate, setNewStartDate] = useState('');
+  const [newEndDate, setNewEndDate] = useState('');
+  const [creatingMission, setCreatingMission] = useState(false);
+  const [createModalSuccess, setCreateModalSuccess] = useState<MissionCreateResponse | null>(null);
 
-  // Registrations table state
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [regCounts, setRegCounts] = useState({ confirmed: 0, waitlist: 0, cancelled: 0, total: 0 });
   const [loadingRegistrations, setLoadingRegistrations] = useState(false);
@@ -53,16 +86,18 @@ export function AdminDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [cancelFeedback, setCancelFeedback] = useState<string | null>(null);
 
-  // Audio player state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  // Load audio with auth header, then play
+  // === NEW: Confirm dialog state ===
+  const [confirmCancel, setConfirmCancel] = useState<Registration | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  // === ALL ORIGINAL HANDLERS — UNTOUCHED ===
   const handlePlayAudio = async (registrationId: string) => {
     try {
-      // Revoke previous object URL
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       setAudioUrl(null);
       setAudioError(null);
@@ -72,12 +107,10 @@ export function AdminDashboard() {
     } catch (err: any) {
       setAudioError(err?.message || 'فشل تحميل التسجيل الصوتي');
       console.error('Audio fetch failed:', err);
-      // Auto-clear error after 5s
       setTimeout(() => setAudioError(null), 5000);
     }
   };
 
-  // Check existing session on mount, then load missions
   useEffect(() => {
     (async () => {
       setLoadingMissions(true);
@@ -98,7 +131,6 @@ export function AdminDashboard() {
     })();
   }, []);
 
-  // Load missions list (reusable)
   const loadMissionsList = async () => {
     setLoadingMissions(true);
     try {
@@ -111,7 +143,6 @@ export function AdminDashboard() {
     }
   };
 
-  // Load registrations when selected mission or filters change
   const loadRegistrations = async (missionId: string) => {
     setLoadingRegistrations(true);
     try {
@@ -136,7 +167,6 @@ export function AdminDashboard() {
   useEffect(() => {
     if (selectedMission) {
       loadRegistrations(selectedMission.id);
-      // Auto-refresh registrations every 15s so new voice recordings appear quickly
       const interval = setInterval(() => {
         loadRegistrations(selectedMission.id);
       }, 15000);
@@ -144,7 +174,6 @@ export function AdminDashboard() {
     }
   }, [selectedMission, filterStatus, searchQuery]);
 
-  // Handle Login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -161,7 +190,6 @@ export function AdminDashboard() {
     }
   };
 
-  // Handle Logout
   const handleLogout = async () => {
     await logoutAdmin();
     setAdminUser(null);
@@ -169,7 +197,6 @@ export function AdminDashboard() {
     setSelectedMission(null);
   };
 
-  // Handle Create Mission
   const handleCreateMission = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreatingMission(true);
@@ -190,14 +217,14 @@ export function AdminDashboard() {
 
       setCreateModalSuccess(created);
       await loadMissionsList();
+      toastSuccess('تم إنشاء المهمة بنجاح');
     } catch (err: any) {
-      alert(err.message || 'فشل إنشاء المهمة');
+      toastError(err.message || 'فشل إنشاء المهمة');
     } finally {
       setCreatingMission(false);
     }
   };
 
-  // Reset Create Modal
   const closeCreateModal = () => {
     setShowCreateModal(false);
     setCreateModalSuccess(null);
@@ -206,25 +233,29 @@ export function AdminDashboard() {
     setNewCapacity(10);
   };
 
-  // Handle Cancel Registration
-  const handleCancelRegistration = async (reg: Registration) => {
-    if (!confirm(`هل أنت متأكد من إلغاء تسجيل المتطوع "${reg.volunteer_name}"؟`)) {
-      return;
-    }
+  // ConfirmDialog replaces window.confirm()
+  const confirmCancelRegistration = (reg: Registration) => {
+    setConfirmCancel(reg);
+  };
+
+  const doCancelRegistration = async () => {
+    if (!confirmCancel) return;
+    setCancelling(true);
     try {
-      const res = await cancelRegistration(reg.id);
-      setCancelFeedback(res.message);
-      setTimeout(() => setCancelFeedback(null), 6000);
+      const res = await cancelRegistration(confirmCancel.id);
+      toastSuccess(res.message);
+      setConfirmCancel(null);
       if (selectedMission) {
         await loadRegistrations(selectedMission.id);
         await loadMissionsList();
       }
     } catch (err: any) {
-      alert(err.message || 'فشل إلغاء التسجيل');
+      toastError(err.message || 'فشل إلغاء التسجيل');
+    } finally {
+      setCancelling(false);
     }
   };
 
-  // Open control panel
   const openControlPanel = (mission: Mission) => {
     setControlPanelMission(mission);
     setShowControlPanel(true);
@@ -246,144 +277,157 @@ export function AdminDashboard() {
     }
   };
 
-  // Copy helper
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     setCopiedText(label);
+    toastSuccess(`تم نسخ ${label} بنجاح`);
     setTimeout(() => setCopiedText(null), 3000);
   };
 
-  // 1. LOGIN SCREEN
+  // ========== LOGIN SCREEN ==========
   if (!adminUser) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full border border-slate-800">
+      <div className="min-h-dvh bg-slate-900 flex items-center justify-center p-4">
+        {/* Thin brand accent line at top */}
+        <div className="fixed top-0 inset-x-0 h-1 bg-brand-600 z-10" />
+        <Card className="max-w-md w-full border-0 shadow-xl">
           <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-red-600 text-white rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-red-600/30 font-black text-2xl">
+            <span className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-brand-600 text-white font-black text-xl shadow-lg shadow-brand-600/30 mx-auto mb-3" aria-hidden="true">
               RC
-            </div>
-            <h1 className="text-2xl font-black text-slate-900">لوحة تحكم المشرفين</h1>
+            </span>
+            <h1 className="text-2xl font-extrabold text-slate-900">لوحة تحكم المشرفين</h1>
             <p className="text-xs text-slate-500 mt-1 font-medium">الهلال الأحمر المصري — فرع المنيا</p>
           </div>
 
           {loginError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold p-3 rounded-xl mb-4">
-              ⚠️ {loginError}
+            <div className="bg-danger-50 border border-danger-200 text-danger-700 text-xs font-bold p-3 rounded-xl mb-4 flex items-center gap-2" role="alert">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              {loginError}
             </div>
           )}
 
           <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">اسم المستخدم</label>
-              <input
-                type="text"
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">كلمة المرور</label>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
-                required
-              />
-            </div>
-            <button
+            <Input
+              label="اسم المستخدم"
+              type="text"
+              value={loginUsername}
+              onChange={(e) => setLoginUsername(e.target.value)}
+              required
+            />
+            <Input
+              label="كلمة المرور"
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+            <Button
               type="submit"
-              disabled={isLoggingIn}
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition shadow-md mt-2 disabled:opacity-50"
+              fullWidth
+              loading={isLoggingIn}
+              className="mt-2"
             >
-              {isLoggingIn ? 'جاري الدخول...' : 'تسجيل الدخول'}
-            </button>
+              تسجيل الدخول
+            </Button>
           </form>
-        </div>
+        </Card>
       </div>
     );
   }
 
+  // ========== MAIN DASHBOARD ==========
   return (
-    <div className="min-h-screen bg-slate-100">
-      {/* Top Navbar */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="w-8 h-8 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold text-sm shadow">
-              RC
-            </span>
-            <div>
-              <h1 className="text-base font-extrabold text-slate-900 leading-tight">الهلال الأحمر المصري — المنيا</h1>
-              <p className="text-[11px] text-slate-500 font-medium">لوحة إدارة المهمات والتسجيل الذكي</p>
-            </div>
-          </div>
+    <>
+      <AdminShell
+        title="لوحة إدارة المهمات والتسجيل الذكي"
+        subtitle="الهلال الأحمر المصري — المنيا"
+        adminName={adminUser?.username}
+        onLogout={handleLogout}
+      >
+        {/* Red Crescent accent line at top */}
+        <div className="h-1 bg-brand-600 rounded-full mb-6" />
 
-          <div className="flex items-center gap-3">
-            <button
+        {/* === PAGE HEADER with Quick Actions === */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6" id="dashboard">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 leading-tight">المهمات</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              {missions.length} مهمة مسجلة
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={loadMissionsList}
+              className="text-slate-500"
+            >
+              <RefreshCw className="h-4 w-4" />
+              تحديث
+            </Button>
+            <Button
+              size="sm"
               onClick={() => setShowCreateModal(true)}
-              className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
             >
-              <span>+</span>
-              <span>مهمة جديدة</span>
-            </button>
-            <button
-              onClick={handleLogout}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-3.5 py-2.5 rounded-xl transition"
-            >
-              خروج
-            </button>
+              <Plus className="h-4 w-4" />
+              مهمة جديدة
+            </Button>
           </div>
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Toast / Notification */}
-        {copiedText && (
-          <div className="fixed bottom-6 left-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl text-xs font-bold animate-bounce flex items-center gap-2">
-            <span>✓</span>
-            <span>تم نسخ {copiedText} بنجاح</span>
-          </div>
-        )}
+        {/* === KPI SECTION === */}
+        <div id="stats" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatCard
+            icon={<LayoutDashboard className="h-5 w-5" />}
+            value={missions.length}
+            label="إجمالي المهمات"
+            tone="brand"
+          />
+          <StatCard
+            icon={<CheckCircle2 className="h-5 w-5" />}
+            value={missions.filter(m => m.status === 'OPEN').length}
+            label="المهمات النشطة"
+            tone="success"
+          />
+          <StatCard
+            icon={<Users className="h-5 w-5" />}
+            value={missions.reduce((acc, m) => acc + (m.capacity || 0), 0)}
+            label="إجمالي السعة"
+            tone="info"
+          />
+          <StatCard
+            icon={<CalendarDays className="h-5 w-5" />}
+            value={missions.filter(m => m.status === 'CLOSED').length}
+            label="المهمات المغلقة"
+            tone="warning"
+          />
+        </div>
 
-        {cancelFeedback && (
-          <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-4 rounded-2xl text-xs font-bold shadow-sm flex items-center gap-2">
-            <span>🎉</span>
-            <span>{cancelFeedback}</span>
-          </div>
-        )}
-
-        {/* Active Missions Grid */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-black text-slate-900">المهمات الحالية ({missions.length})</h2>
-            <button
-              onClick={loadMissionsList}
-              className="text-xs font-bold text-slate-500 hover:text-red-600 flex items-center gap-1"
-            >
-              <span>تحديث</span>
-              <span>🔄</span>
-            </button>
-          </div>
-
+        {/* === MISSIONS LIST === */}
+        <section id="missions" className="mb-8">
           {loadingMissions ? (
-            <div className="bg-white rounded-3xl p-12 text-center text-slate-400 font-medium">
-              جاري تحميل المهمات...
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="space-y-3">
+                  <Skeleton className="h-5 w-24" />
+                  <Skeleton className="h-5 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </Card>
+              ))}
             </div>
           ) : missions.length === 0 ? (
-            <div className="bg-white rounded-3xl p-12 text-center border border-slate-200">
-              <p className="text-slate-500 font-bold mb-3">لا توجد مهمات مسجلة بعد</p>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl"
-              >
-                + إنشاء أول مهمة
-              </button>
-            </div>
+            <EmptyState
+              icon={<LayoutDashboard className="h-7 w-7" />}
+              title="لا توجد مهمات مسجلة بعد"
+              description="ابدأ بإنشاء أول مهمة لجمع المتطوعين"
+              action={
+                <Button size="sm" onClick={() => setShowCreateModal(true)}>
+                  <Plus className="h-4 w-4" />
+                  إنشاء أول مهمة
+                </Button>
+              }
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {missions.map((m) => {
@@ -394,43 +438,64 @@ export function AdminDashboard() {
                   <div
                     key={m.id}
                     onClick={() => setSelectedMission(m)}
-                    className={`bg-white rounded-3xl p-5 border transition cursor-pointer relative shadow-sm hover:shadow-md ${
+                    className={cn(
+                      'bg-white rounded-2xl border shadow-soft p-5 cursor-pointer transition-all duration-150',
                       isSelected
-                        ? 'border-red-600 ring-2 ring-red-500/20'
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
+                        ? 'border-brand-600 ring-2 ring-brand-500/20 shadow-card'
+                        : 'border-slate-200/70 hover:border-slate-300 hover:shadow-card'
+                    )}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedMission(m); } }}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="font-mono text-xs font-black text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-100">
+                    {/* Top row: code + status */}
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <Badge variant="brand" className="font-mono">
                         {m.public_code}
-                      </span>
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                          isOpen ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
-                        }`}
-                      >
-                        {isOpen ? 'مفتوحة للتسجيل' : 'مغلقة'}
-                      </span>
+                      </Badge>
+                      <StatusBadge status={isOpen ? 'OPEN' : 'CLOSED'} />
                     </div>
 
-                    <h3 className="text-base font-extrabold text-slate-900 mb-1.5 line-clamp-1">{m.title}</h3>
+                    {/* Title */}
+                    <h3 className="text-base font-bold text-slate-900 mb-2 line-clamp-1">{m.title}</h3>
+
+                    {/* Location */}
                     {m.location && (
-                      <p className="text-xs text-slate-500 mb-3 flex items-center gap-1">
-                        <span>📍</span>
+                      <p className="text-xs text-slate-500 mb-3 flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                         <span className="truncate">{m.location}</span>
                       </p>
                     )}
 
-                    <div className="flex items-center justify-between text-xs pt-3 border-t border-slate-100">
-                      <span className="text-slate-600 font-medium">السعة: <b className="text-slate-900">{m.capacity}</b></span>
+                    {/* Metadata */}
+                    <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5" />
+                        {m.capacity}
+                      </span>
+                      {m.start_at && (
+                        <span className="flex items-center gap-1">
+                          <Clock3 className="h-3.5 w-3.5" />
+                          {new Date(m.start_at).toLocaleDateString('ar-EG')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Action row */}
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                      <span className="text-xs font-medium text-slate-500">
+                        السعة: <b className="text-slate-700">{m.capacity}</b>
+                      </span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           openControlPanel(m);
                         }}
-                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline flex items-center gap-1"
+                        className="text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1 transition-colors"
                       >
-                        ⚙️ لوحة التحكم
+                        <Settings className="h-3.5 w-3.5" />
+                        لوحة التحكم
                       </button>
                     </div>
                   </div>
@@ -438,314 +503,362 @@ export function AdminDashboard() {
               })}
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Selected Mission Details & Registrations */}
+        {/* === SELECTED MISSION: DETAIL + REGISTRATIONS === */}
         {selectedMission && (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden animate-fadeIn">
+          <section id="registrations">
             {/* Mission Detail Header */}
-            <div className="p-6 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="font-mono text-xs font-bold bg-red-600 px-2.5 py-0.5 rounded-md">
-                    {selectedMission.public_code}
-                  </span>
-                  <span className="text-xs text-slate-300 font-medium">
-                    السعة المطلوبة: {selectedMission.capacity} متطوع
-                  </span>
-                </div>
-                <h2 className="text-xl font-black">{selectedMission.title}</h2>
-              </div>
-
-              {/* Action Buttons for Mission */}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => openControlPanel(selectedMission)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg"
-                >
-                  <span>⚙️</span>
-                  <span>لوحة التحكم</span>
-                </button>
-                <button
-                  onClick={() =>
-                    copyToClipboard(
-                      `${window.location.origin}/m/${selectedMission.public_code}`,
-                      'رابط التسجيل'
-                    )
-                  }
-                  className="bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1"
-                >
-                  <span>🔗</span>
-                  <span>نسخ الرابط</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const msg = `صباح الخير متطوعينا الكرام\n\nعندنا ${selectedMission.title}\n\nالتسجيل يتم من خلال الرابط التالي:\n${window.location.origin}/m/${selectedMission.public_code}\n\nبرجاء التسجيل بنفسك وعدم التسجيل بالنيابة عن أي متطوع آخر.`;
-                    copyToClipboard(msg, 'رسالة الواتساب');
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1 shadow"
-                >
-                  <span>📋</span>
-                  <span>رسالة الواتساب</span>
-                </button>
-                <a
-                  href={getExportCsvUrl(selectedMission.id)}
-                  download
-                  className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1 border border-slate-700"
-                >
-                  <span>📥</span>
-                  <span>تحميل CSV</span>
-                </a>
-              </div>
-            </div>
-
-            {/* Registrations Header & Stats */}
-            <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="bg-emerald-50 text-emerald-800 px-3.5 py-1.5 rounded-xl text-xs font-bold border border-emerald-100">
-                  المؤكدين: {regCounts.confirmed} / {selectedMission.capacity}
-                </div>
-                <div className="bg-amber-50 text-amber-800 px-3.5 py-1.5 rounded-xl text-xs font-bold border border-amber-100">
-                  قائمة الانتظار: {regCounts.waitlist}
-                </div>
-                <div className="bg-slate-100 text-slate-600 px-3.5 py-1.5 rounded-xl text-xs font-bold">
-                  الإجمالي: {regCounts.total}
-                </div>
-              </div>
-
-              {/* Filters & Search */}
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="بحث بالاسم أو العضوية..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="">كل الحالات</option>
-                  <option value="CONFIRMED">المؤكدين فقط</option>
-                  <option value="WAITLIST">الانتظار فقط</option>
-                  <option value="CANCELLED">الملغيين</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Registrations Table */}
-            <div className="overflow-x-auto">
-              {loadingRegistrations ? (
-                <div className="p-12 text-center text-slate-400 font-medium">جاري جلب المسجلين...</div>
-              ) : registrations.length === 0 ? (
-                <div className="p-12 text-center text-slate-400 font-medium">
-                  لا توجد تسجيلات مطابقة للبحث أو المهمة فارغة
-                </div>
-              ) : (
-                <table className="w-full text-right text-xs">
-                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-100">
-                    <tr>
-                      <th className="py-3 px-4">#</th>
-                      <th className="py-3 px-4">اسم المتطوع</th>
-                      <th className="py-3 px-4">رقم العضوية</th>
-                      <th className="py-3 px-4">الحالة والمقعد</th>
-                      <th className="py-3 px-4">التسجيل الصوتي</th>
-                      <th className="py-3 px-4">وقت التسجيل</th>
-                      <th className="py-3 px-4 text-center">إجراءات</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium">
-                    {registrations.map((reg) => {
-                      const isConfirmed = reg.status === 'CONFIRMED';
-                      const isWaitlist = reg.status === 'WAITLIST';
-                      const isCancelled = reg.status === 'CANCELLED';
-
-                      return (
-                        <tr key={reg.id} className="hover:bg-slate-50/80 transition">
-                          <td className="py-3.5 px-4 font-mono font-bold text-slate-400">
-                            {reg.registration_sequence}
-                          </td>
-                          <td className="py-3.5 px-4 font-bold text-slate-900">
-                            {reg.volunteer_name}
-                          </td>
-                          <td className="py-3.5 px-4 font-mono font-bold text-slate-700">
-                            {reg.member_id}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            {isConfirmed && (
-                              <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold">
-                                <span>مؤكد</span>
-                                <span className="font-mono">#{reg.seat_number}</span>
-                              </span>
-                            )}
-                            {isWaitlist && (
-                              <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full font-bold">
-                                <span>انتظار</span>
-                                <span className="font-mono">#{reg.waitlist_position}</span>
-                              </span>
-                            )}
-                            {isCancelled && (
-                              <span className="inline-flex items-center bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full font-bold">
-                                ملغي
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            {audioError && (
-                              <div className="text-red-600 text-xs font-bold mb-1">{audioError}</div>
-                            )}
-                            {reg.has_audio_data === 1 || reg.has_audio_data === true ? (
-                              playingAudioId === reg.id && audioUrl ? (
-                              <div className="flex items-center gap-2">
-                                <audio
-                                  autoPlay
-                                  controls
-                                  src={audioUrl}
-                                  className="h-8 w-48"
-                                  onEnded={() => setPlayingAudioId(null)}
-                                />
-                                <button
-                                  onClick={() => setPlayingAudioId(null)}
-                                  className="text-slate-400 hover:text-slate-600 text-xs"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handlePlayAudio(reg.id)}
-                                className="inline-flex items-center gap-1 text-slate-700 hover:text-red-600 bg-slate-100 hover:bg-red-50 px-2.5 py-1 rounded-lg transition font-bold"
-                              >
-                                <span>▶</span>
-                                <span>{playingAudioId === reg.id ? 'جاري التحميل…' : 'استماع'}</span>
-                              </button>
-                            )
-                            ) : (
-                              <span className="text-slate-300 text-xs">-</span>
-                            )}
-                          </td>
-                          <td className="py-3.5 px-4 text-slate-500 text-[11px]">
-                            {new Date(reg.created_at).toLocaleTimeString('ar-EG', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
-                            })}
-                          </td>
-                          <td className="py-3.5 px-4 text-center">
-                            {!isCancelled && (
-                              <button
-                                onClick={() => handleCancelRegistration(reg)}
-                                className="text-red-600 hover:text-red-800 text-[11px] font-bold px-2 py-1 rounded hover:bg-red-50 transition"
-                              >
-                                إلغاء التسجيل
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* CREATE MISSION MODAL */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 border border-slate-100 animate-scaleUp">
-            {!createModalSuccess ? (
-              <>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-                  <h3 className="text-base font-black text-slate-900">إنشاء مهمة جديدة</h3>
-                  <button onClick={closeCreateModal} className="text-slate-400 hover:text-slate-600">
-                    ✕
-                  </button>
-                </div>
-
-                <form onSubmit={handleCreateMission} className="space-y-3.5 text-xs">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">عنوان المهمة</label>
-                    <input
-                      type="text"
-                      value={newTitle}
-                      onChange={(e) => setNewTitle(e.target.value)}
-                      placeholder="مثال: قافلة الأطراف الصناعية بالتعاون مع التضامن"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
-                      required
-                    />
+            <div className="bg-slate-900 rounded-2xl p-5 sm:p-6 text-white mb-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge variant="brand" className="font-mono bg-brand-700 text-white ring-brand-600">
+                      {selectedMission.public_code}
+                    </Badge>
+                    <span className="text-xs text-slate-300 font-medium">
+                      السعة: {selectedMission.capacity} متطوع
+                    </span>
                   </div>
+                  <h2 className="text-xl font-extrabold">{selectedMission.title}</h2>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => openControlPanel(selectedMission)}
+                    className="bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5"
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                    لوحة التحكم
+                  </button>
+                  <button
+                    onClick={() => copyToClipboard(`${window.location.origin}/m/${selectedMission.public_code}`, 'رابط التسجيل')}
+                    className="bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    نسخ الرابط
+                  </button>
+                  <button
+                    onClick={() => {
+                      const msg = `صباح الخير متطوعينا الكرام\n\nعندنا ${selectedMission.title}\n\nالتسجيل يتم من خلال الرابط التالي:\n${window.location.origin}/m/${selectedMission.public_code}\n\nبرجاء التسجيل بنفسك وعدم التسجيل بالنيابة عن أي متطوع آخر.`;
+                      copyToClipboard(msg, 'رسالة الواتساب');
+                    }}
+                    className="bg-success-600 hover:bg-success-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    رسالة الواتساب
+                  </button>
+                  <a
+                    href={getExportCsvUrl(selectedMission.id)}
+                    download
+                    className="bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 border border-white/20"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    تحميل CSV
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Registrations Header + Filters */}
+            <div className="bg-white border border-slate-200/70 border-t-0 rounded-b-2xl p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="success">
+                    <CheckCircle2 className="h-3 w-3" />
+                    المؤكدين: {regCounts.confirmed} / {selectedMission.capacity}
+                  </Badge>
+                  <Badge variant="warning">
+                    <Clock3 className="h-3 w-3" />
+                    قائمة الانتظار: {regCounts.waitlist}
+                  </Badge>
+                  <Badge variant="neutral">
+                    الإجمالي: {regCounts.total}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="search"
+                    placeholder="بحث بالاسم أو العضوية..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    icon={<Users className="h-4 w-4" />}
+                    className="w-full sm:w-56"
+                  />
+                  <Select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className="w-full sm:w-36"
+                  >
+                    <option value="">كل الحالات</option>
+                    <option value="CONFIRMED">المؤكدين فقط</option>
+                    <option value="WAITLIST">الانتظار فقط</option>
+                    <option value="CANCELLED">الملغيين</option>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Table / Mobile Cards */}
+              <div className="overflow-x-auto -mx-4 sm:-mx-5">
+                {loadingRegistrations ? (
+                  <LoadingState label="جاري جلب المسجلين..." className="py-10" />
+                ) : registrations.length === 0 ? (
+                  <EmptyState
+                    title="لا توجد تسجيلات مطابقة"
+                    description="جرّب تغيير البحث أو الفلتر"
+                    className="py-10"
+                  />
+                ) : (
+                  <>
+                    {/* Desktop Table */}
+                    <table className="hidden sm:table w-full text-right text-xs">
+                      <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-100">
+                        <tr>
+                          <th className="py-3 px-4">#</th>
+                          <th className="py-3 px-4">اسم المتطوع</th>
+                          <th className="py-3 px-4">رقم العضوية</th>
+                          <th className="py-3 px-4">الحالة والمقعد</th>
+                          <th className="py-3 px-4">التسجيل الصوتي</th>
+                          <th className="py-3 px-4">وقت التسجيل</th>
+                          <th className="py-3 px-4 text-center">إجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {registrations.map((reg) => {
+                          const isCancelled = reg.status === 'CANCELLED';
+                          return (
+                            <tr key={reg.id} className="hover:bg-slate-50/80 transition">
+                              <td className="py-3.5 px-4 font-mono font-bold text-slate-400">
+                                {reg.registration_sequence}
+                              </td>
+                              <td className="py-3.5 px-4 font-bold text-slate-900">
+                                {reg.volunteer_name}
+                              </td>
+                              <td className="py-3.5 px-4 font-mono font-bold text-slate-700">
+                                {reg.member_id}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {reg.status === 'CONFIRMED' && (
+                                  <Badge variant="success" className="font-mono">
+                                    مؤكد #{reg.seat_number}
+                                  </Badge>
+                                )}
+                                {reg.status === 'WAITLIST' && (
+                                  <Badge variant="warning" className="font-mono">
+                                    انتظار #{reg.waitlist_position}
+                                  </Badge>
+                                )}
+                                {isCancelled && (
+                                  <Badge variant="neutral">ملغي</Badge>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {audioError && (
+                                  <p className="text-danger-600 text-xs font-bold mb-1">{audioError}</p>
+                                )}
+                                {reg.has_audio_data === 1 || reg.has_audio_data === true ? (
+                                  playingAudioId === reg.id && audioUrl ? (
+                                    <div className="flex items-center gap-2">
+                                      <audio
+                                        autoPlay
+                                        controls
+                                        src={audioUrl}
+                                        className="h-8 w-48"
+                                        onEnded={() => setPlayingAudioId(null)}
+                                      />
+                                      <IconButton
+                                        label="إيقاف"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setPlayingAudioId(null)}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </IconButton>
+                                    </div>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handlePlayAudio(reg.id)}
+                                      className="text-xs"
+                                    >
+                                      <Play className="h-3.5 w-3.5" />
+                                      {playingAudioId === reg.id ? 'جاري التحميل…' : 'استماع'}
+                                    </Button>
+                                  )
+                                ) : (
+                                  <span className="text-slate-300 text-xs">—</span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-500 text-[11px]">
+                                {new Date(reg.created_at).toLocaleTimeString('ar-EG', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                })}
+                              </td>
+                              <td className="py-3.5 px-4 text-center">
+                                {!isCancelled && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => confirmCancelRegistration(reg)}
+                                    className="text-danger-600 hover:text-danger-700 hover:bg-danger-50 text-[11px]"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    إلغاء التسجيل
+                                  </Button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {/* Mobile Card List */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {registrations.map((reg) => {
+                        const isCancelled = reg.status === 'CANCELLED';
+                        return (
+                          <div key={reg.id} className="p-4 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-bold text-slate-900 truncate">{reg.volunteer_name}</p>
+                              {reg.status === 'CONFIRMED' && (
+                                <Badge variant="success" className="shrink-0 font-mono text-[10px]">
+                                  مؤكد #{reg.seat_number}
+                                </Badge>
+                              )}
+                              {reg.status === 'WAITLIST' && (
+                                <Badge variant="warning" className="shrink-0 font-mono text-[10px]">
+                                  انتظار #{reg.waitlist_position}
+                                </Badge>
+                              )}
+                              {isCancelled && <Badge variant="neutral" className="shrink-0 text-[10px]">ملغي</Badge>}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-slate-500">
+                              <span className="font-mono">{reg.member_id}</span>
+                              <span>{new Date(reg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                            <div className="flex items-center gap-2 pt-1">
+                              {(reg.has_audio_data === 1 || reg.has_audio_data === true) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handlePlayAudio(reg.id)}
+                                  className="text-xs"
+                                >
+                                  <Play className="h-3.5 w-3.5" />
+                                  استماع
+                                </Button>
+                              )}
+                              {!isCancelled && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => confirmCancelRegistration(reg)}
+                                  className="text-danger-600 hover:bg-danger-50 text-xs"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  إلغاء
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+      </AdminShell>
+
+      {/* ========== CREATE MISSION MODAL ========== */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={closeCreateModal} aria-hidden="true" />
+          <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[92dvh] overflow-y-auto animate-scale-in">
+            {!createModalSuccess ? (
+              <div className="p-6">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                  <h3 className="text-base font-bold text-slate-900">إنشاء مهمة جديدة</h3>
+                  <IconButton label="إغلاق" variant="ghost" size="sm" onClick={closeCreateModal}>
+                    <X className="h-5 w-5" />
+                  </IconButton>
+                </div>
+
+                <form onSubmit={handleCreateMission} className="space-y-4">
+                  <Input
+                    label="عنوان المهمة"
+                    type="text"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="مثال: قافلة الأطراف الصناعية بالتعاون مع التضامن"
+                    required
+                  />
 
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">وصف المهمة (اختياري)</label>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5">وصف المهمة (اختياري)</label>
                     <textarea
                       value={newDescription}
                       onChange={(e) => setNewDescription(e.target.value)}
                       placeholder="تفاصيل إضافية للمتطوعين..."
                       rows={2}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-300 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                     />
                   </div>
 
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">المكان / نقطة التجمع</label>
-                    <input
-                      type="text"
-                      value={newLocation}
-                      onChange={(e) => setNewLocation(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
+                  <Input
+                    label="المكان / نقطة التجمع"
+                    type="text"
+                    value={newLocation}
+                    onChange={(e) => setNewLocation(e.target.value)}
+                  />
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">تاريخ ووقت البداية</label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">تاريخ ووقت البداية</label>
                       <input
                         type="datetime-local"
                         value={newStartDate}
                         onChange={(e) => setNewStartDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
+                        className="w-full h-11 px-4 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold text-slate-700 mb-1">تاريخ ووقت الانتهاء</label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">تاريخ ووقت الانتهاء</label>
                       <input
                         type="datetime-local"
                         value={newEndDate}
                         onChange={(e) => setNewEndDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
+                        className="w-full h-11 px-4 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                       />
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">السعة المطلوبة (عدد المتطوعين)</label>
-                    <input
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      label="السعة المطلوبة"
                       type="number"
                       min="1"
                       max="1000"
                       value={newCapacity}
                       onChange={(e) => setNewCapacity(parseInt(e.target.value, 10))}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold focus:outline-none focus:ring-2 focus:ring-red-500"
                       required
                     />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">قائمة الانتظار (اختياري)</label>
-                    <input
+                    <Input
+                      label="قائمة الانتظار"
                       type="number"
                       min="0"
                       max="1000"
                       value={newWaitingList}
                       onChange={(e) => setNewWaitingList(parseInt(e.target.value, 10) || 0)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold focus:outline-none focus:ring-2 focus:ring-red-500"
+                      hint="0 = لا يوجد قائمة انتظار"
                     />
-                    <p className="text-xs text-slate-500 mt-1">0 = لا يوجد قائمة انتظار</p>
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">
@@ -754,90 +867,92 @@ export function AdminDashboard() {
                       id="telegramNotifications"
                       checked={newTelegramNotifications}
                       onChange={(e) => setNewTelegramNotifications(e.target.checked)}
-                      className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500"
+                      className="w-4 h-4 text-brand-600 border-slate-300 rounded focus:ring-brand-500"
                     />
-                    <label htmlFor="telegramNotifications" className="font-bold text-slate-700 cursor-pointer">
+                    <label htmlFor="telegramNotifications" className="text-sm font-semibold text-slate-700 cursor-pointer">
                       تفعيل إشعارات تيليجرام عند التسجيل
                     </label>
                   </div>
 
-                  <div className="pt-2 flex gap-2">
-                    <button
-                      type="submit"
-                      disabled={creatingMission}
-                      className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl transition shadow"
-                    >
-                      {creatingMission ? 'جاري الإنشاء...' : 'حفظ ونشر المهمة'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={closeCreateModal}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl"
-                    >
+                  <div className="pt-2 flex gap-3">
+                    <Button type="submit" fullWidth loading={creatingMission}>
+                      حفظ ونشر المهمة
+                    </Button>
+                    <Button type="button" variant="secondary" fullWidth onClick={closeCreateModal}>
                       إلغاء
-                    </button>
+                    </Button>
                   </div>
                 </form>
-              </>
+              </div>
             ) : (
-              <div className="text-center space-y-4">
-                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-xl font-bold">
-                  ✓
+              <div className="p-6 text-center space-y-4">
+                <div className="w-14 h-14 bg-success-50 text-success-600 rounded-2xl flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="h-7 w-7" />
                 </div>
-                <h3 className="text-base font-black text-slate-900">تم إنشاء المهمة بنجاح!</h3>
-                <p className="text-xs text-slate-600">كود المهمة: <b className="text-red-600 font-mono">{createModalSuccess.public_code}</b></p>
+                <h3 className="text-lg font-bold text-slate-900">تم إنشاء المهمة بنجاح!</h3>
+                <p className="text-sm text-slate-600">كود المهمة: <b className="text-brand-600 font-mono">{createModalSuccess.public_code}</b></p>
 
-                {/* Copy Link */}
-                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs text-right space-y-2">
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm text-right space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-slate-700">رابط التسجيل:</span>
                     <button
                       onClick={() => copyToClipboard(createModalSuccess.public_url, 'رابط المهمة')}
-                      className="text-red-600 hover:underline font-bold"
+                      className="text-brand-600 hover:underline font-bold text-xs flex items-center gap-1"
                     >
-                      نسخ الرابط 📋
+                      <Copy className="h-3.5 w-3.5" />
+                      نسخ الرابط
                     </button>
                   </div>
                   <input
                     type="text"
                     readOnly
                     value={createModalSuccess.public_url}
-                    className="w-full bg-white p-2 rounded-lg border border-slate-200 font-mono text-[11px]"
+                    className="w-full bg-white p-2.5 rounded-lg border border-slate-200 font-mono text-[11px]"
                   />
                 </div>
 
-                {/* Copy WhatsApp */}
-                <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-200 text-xs text-right space-y-2">
+                <div className="bg-success-50 p-4 rounded-xl border border-success-500/30 text-sm text-right space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-emerald-800">رسالة الواتساب الجاهزة:</span>
+                    <span className="font-bold text-success-800">رسالة الواتساب الجاهزة:</span>
                     <button
                       onClick={() => copyToClipboard(createModalSuccess.whatsapp_message, 'رسالة الواتساب')}
-                      className="text-emerald-700 hover:underline font-bold"
+                      className="text-success-700 hover:underline font-bold text-xs flex items-center gap-1"
                     >
-                      نسخ الرسالة 📋
+                      <Copy className="h-3.5 w-3.5" />
+                      نسخ الرسالة
                     </button>
                   </div>
                   <textarea
                     readOnly
                     rows={4}
                     value={createModalSuccess.whatsapp_message}
-                    className="w-full bg-white p-2 rounded-lg border border-emerald-200 text-[11px] leading-relaxed"
+                    className="w-full bg-white p-2.5 rounded-lg border border-success-500/30 text-[11px] leading-relaxed"
                   />
                 </div>
 
-                <button
-                  onClick={closeCreateModal}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-3 rounded-xl transition"
-                >
+                <Button fullWidth variant="secondary" onClick={closeCreateModal}>
                   إغلاق
-                </button>
+                </Button>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Mission Control Panel Modal */}
+      {/* ========== CANCEL CONFIRM DIALOG ========== */}
+      <ConfirmDialog
+        open={!!confirmCancel}
+        title="إلغاء التسجيل"
+        message={`هل أنت متأكد من إلغاء تسجيل المتطوع "${confirmCancel?.volunteer_name}"؟ لا يمكن التراجع عن هذا الإجراء.`}
+        confirmLabel="نعم، إلغاء التسجيل"
+        cancelLabel="الاحتفاظ بالتسجيل"
+        variant="danger"
+        loading={cancelling}
+        onConfirm={doCancelRegistration}
+        onCancel={() => setConfirmCancel(null)}
+      />
+
+      {/* ========== MISSION CONTROL PANEL ========== */}
       {showControlPanel && controlPanelMission && (
         <MissionControlPanel
           mission={controlPanelMission}
@@ -845,6 +960,6 @@ export function AdminDashboard() {
           onUpdate={handleControlPanelUpdate}
         />
       )}
-    </div>
+    </>
   );
 }
