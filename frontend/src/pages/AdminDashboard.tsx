@@ -19,6 +19,7 @@ import {
   CalendarDays,
   Clock3,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import AdminShell from '@/components/layout/AdminShell';
 import Button from '@/components/ui/Button';
@@ -45,6 +46,7 @@ import {
   createMission,
   getMissionRegistrations,
   cancelRegistration,
+  moveRegistrationStatus,
   fetchAudioPlaybackUrl,
   getExportCsvUrl,
 } from '@/api/admin';
@@ -94,6 +96,7 @@ export function AdminDashboard(_props: Props) {
   // === NEW: Confirm dialog state ===
   const [confirmCancel, setConfirmCancel] = useState<Registration | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [movingStatus, setMovingStatus] = useState<string | null>(null); // registrationId being moved
 
   // === ALL ORIGINAL HANDLERS — UNTOUCHED ===
   const handlePlayAudio = async (registrationId: string) => {
@@ -253,6 +256,23 @@ export function AdminDashboard(_props: Props) {
       toastError(err.message || 'فشل إلغاء التسجيل');
     } finally {
       setCancelling(false);
+    }
+  };
+
+  // Move registration between WAITLIST <-> CONFIRMED (mirrors Telegram bot)
+  const handleMoveStatus = async (reg: Registration, targetStatus: 'CONFIRMED' | 'WAITLIST') => {
+    setMovingStatus(reg.id);
+    try {
+      const res = await moveRegistrationStatus(reg.id, targetStatus);
+      toastSuccess(res.message);
+      if (selectedMission) {
+        await loadRegistrations(selectedMission.id);
+        await loadMissionsList();
+      }
+    } catch (err: any) {
+      toastError(err.message || 'فشل تغيير حالة المتطوع');
+    } finally {
+      setMovingStatus(null);
     }
   };
 
@@ -699,17 +719,51 @@ export function AdminDashboard(_props: Props) {
                                 })}
                               </td>
                               <td className="py-3.5 px-4 text-center">
-                                {!isCancelled && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => confirmCancelRegistration(reg)}
-                                    className="text-danger-600 hover:text-danger-700 hover:bg-danger-50 text-[11px]"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                    إلغاء التسجيل
-                                  </Button>
-                                )}
+                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                  {!isCancelled && reg.status === 'WAITLIST' && (
+                                    <Button
+                                      variant="primary"
+                                      size="sm"
+                                      onClick={() => handleMoveStatus(reg, 'CONFIRMED')}
+                                      disabled={movingStatus === reg.id}
+                                      className="text-[11px] px-2.5 py-1.5"
+                                    >
+                                      {movingStatus === reg.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                      )}
+                                      تأكيد
+                                    </Button>
+                                  )}
+                                  {!isCancelled && reg.status === 'CONFIRMED' && (
+                                    <Button
+                                      variant="warning"
+                                      size="sm"
+                                      onClick={() => handleMoveStatus(reg, 'WAITLIST')}
+                                      disabled={movingStatus === reg.id}
+                                      className="text-[11px] px-2.5 py-1.5"
+                                    >
+                                      {movingStatus === reg.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Clock3 className="h-3.5 w-3.5" />
+                                      )}
+                                      تحويل للانتظار
+                                    </Button>
+                                  )}
+                                  {!isCancelled && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => confirmCancelRegistration(reg)}
+                                      className="text-danger-600 hover:text-danger-700 hover:bg-danger-50 text-[11px]"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                      إلغاء التسجيل
+                                    </Button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -741,7 +795,7 @@ export function AdminDashboard(_props: Props) {
                               <span className="font-mono">{reg.member_id}</span>
                               <span>{new Date(reg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
-                            <div className="flex items-center gap-2 pt-1">
+                            <div className="flex items-center gap-2 pt-1 flex-wrap">
                               {(reg.has_audio_data === 1 || reg.has_audio_data === true) && (
                                 <Button
                                   variant="ghost"
@@ -751,6 +805,38 @@ export function AdminDashboard(_props: Props) {
                                 >
                                   <Play className="h-3.5 w-3.5" />
                                   استماع
+                                </Button>
+                              )}
+                              {!isCancelled && reg.status === 'WAITLIST' && (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => handleMoveStatus(reg, 'CONFIRMED')}
+                                  disabled={movingStatus === reg.id}
+                                  className="text-xs"
+                                >
+                                  {movingStatus === reg.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  )}
+                                  تأكيد
+                                </Button>
+                              )}
+                              {!isCancelled && reg.status === 'CONFIRMED' && (
+                                <Button
+                                  variant="warning"
+                                  size="sm"
+                                  onClick={() => handleMoveStatus(reg, 'WAITLIST')}
+                                  disabled={movingStatus === reg.id}
+                                  className="text-xs"
+                                >
+                                  {movingStatus === reg.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Clock3 className="h-3.5 w-3.5" />
+                                  )}
+                                  تحويل للانتظار
                                 </Button>
                               )}
                               {!isCancelled && (

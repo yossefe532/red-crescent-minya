@@ -501,6 +501,141 @@ adminRoutes.post('/registrations/:regId/cancel', adminAuth, async (c) => {
   }
 });
 
+// POST /api/admin/registrations/:regId/status - Move volunteer between WAITLIST and CONFIRMED
+adminRoutes.post('/registrations/:regId/status', adminAuth, async (c) => {
+  try {
+    const regId = c.req.param('regId') as string;
+    const body = await c.req.json();
+    const targetStatus = body?.status;
+
+    if (targetStatus !== 'CONFIRMED' && targetStatus !== 'WAITLIST') {
+      return Errors.validation(c, [
+        { path: 'status', message: 'status يجب أن يكون CONFIRMED أو WAITLIST' },
+      ]);
+    }
+
+    // Fetch registration JOIN volunteer + mission (same as Telegram handleVolunteerMove)
+    const regResult = await c.env.DB.prepare(
+      `SELECT r.id, r.status, r.seat_number, r.waitlist_position, v.name, m.title, m.public_code, m.id as mission_id
+       FROM registrations r
+       JOIN volunteers v ON v.id = r.volunteer_id
+       JOIN missions m ON r.mission_id = m.id
+       WHERE r.id = ?`
+    ).bind(regId).first();
+    const reg = regResult as any;
+
+    if (!reg) {
+      return Errors.notFound(c, 'Registration');
+    }
+
+    if (reg.status === 'CANCELLED') {
+      return Errors.conflict(c, 'لا يمكن تغيير حالة تسجيل ملغي');
+    }
+
+    if (reg.status === targetStatus) {
+      return Errors.conflict(c, `المتطوع بالفعل ${targetStatus === 'CONFIRMED' ? 'مؤكد' : 'في قائمة الانتظار'}`);
+    }
+
+    const availability = await getMissionAvailability(c.env.DB, reg.mission_id);
+
+    // ── Moving to CONFIRMED ──
+    if (targetStatus === 'CONFIRMED') {
+      if (availability.available <= 0) {
+        return Errors.conflict(c, 'لا يمكن تأكيد المتطوع: لا يوجد مقعد شاغر');
+      }
+
+      const newSeat = availability.confirmed + 1;
+
+      await c.env.DB.prepare(
+        `UPDATE registrations
+         SET status = 'CONFIRMED', seat_number = ?, waitlist_position = NULL, confirmed_at = datetime('now')
+         WHERE id = ?`
+      ).bind(newSeat, regId).run();
+
+      // Decrement waitlist positions of those after this volunteer
+      if (reg.waitlist_position) {
+        await c.env.DB.prepare(
+          `UPDATE registrations SET waitlist_position = waitlist_position - 1
+           WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?`
+        ).bind(reg.mission_id, reg.waitlist_position).run();
+      }
+
+      const adminId = getAdminId(c);
+      await logAudit(c.env.DB, {
+        actorId: adminId,
+        actorType: 'admin',
+        action: 'VOLUNTEER_CONFIRMED',
+        entityType: 'registration',
+        entityId: regId,
+        metadata: { missionId: reg.mission_id, seatNumber: newSeat },
+      });
+
+      return success(c, {
+        registration_id: regId,
+        status: 'CONFIRMED',
+        seat_number: newSeat,
+        message: `تم تأكيد ${reg.name} في المقعد ${newSeat}`,
+      });
+    }
+
+    // ── Moving to WAITLIST ──
+    if (targetStatus === 'WAITLIST') {
+      if (availability.waitlist_available <= 0) {
+        return Errors.conflict(c, 'لا يمكن نقل المتطوع للانتظار: قائمة الانتظار ممتلئة');
+      }
+
+      const newWaitlistPos = availability.waitlist + 1;
+
+      await c.env.DB.prepare(
+        `UPDATE registrations
+         SET status = 'WAITLIST', waitlist_position = ?, seat_number = NULL
+         WHERE id = ?`
+      ).bind(newWaitlistPos, regId).run();
+
+      // Free the seat — promote first waitlisted if any
+      if (reg.seat_number) {
+        const next = await c.env.DB.prepare(
+          `SELECT r.id FROM registrations r
+           WHERE r.mission_id = ? AND r.status = 'WAITLIST' AND r.id != ?
+           ORDER BY r.waitlist_position ASC LIMIT 1`
+        ).bind(reg.mission_id, regId).first() as any;
+
+        if (next) {
+          await c.env.DB.prepare(
+            `UPDATE registrations SET status = 'CONFIRMED', seat_number = ?, waitlist_position = NULL, confirmed_at = datetime('now')
+             WHERE id = ?`
+          ).bind(reg.seat_number, next.id).run();
+
+          await c.env.DB.prepare(
+            `UPDATE registrations SET waitlist_position = waitlist_position - 1
+             WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?`
+          ).bind(reg.mission_id, reg.waitlist_position || 0).run();
+        }
+      }
+
+      const adminId = getAdminId(c);
+      await logAudit(c.env.DB, {
+        actorId: adminId,
+        actorType: 'admin',
+        action: 'VOLUNTEER_WAITLISTED',
+        entityType: 'registration',
+        entityId: regId,
+        metadata: { missionId: reg.mission_id, waitlistPosition: newWaitlistPos },
+      });
+
+      return success(c, {
+        registration_id: regId,
+        status: 'WAITLIST',
+        waitlist_position: newWaitlistPos,
+        message: `تم تحويل ${reg.name} إلى قائمة الانتظار (رقم ${newWaitlistPos})`,
+      });
+    }
+  } catch (err: any) {
+    console.error('Change registration status error:', err);
+    return Errors.internal(c);
+  }
+});
+
 // POST /api/admin/missions/:id/cancel/:regId - Cancel a specific registration (with mission in URL)
 adminRoutes.post('/missions/:id/cancel/:regId', adminAuth, async (c) => {
   try {

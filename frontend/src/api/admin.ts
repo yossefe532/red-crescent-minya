@@ -251,6 +251,29 @@ export async function cancelRegistration(registrationId: string): Promise<{
   return data.data;
 }
 
+// Move a registration between WAITLIST <-> CONFIRMED (mirrors Telegram bot handleVolunteerMove)
+export async function moveRegistrationStatus(
+  registrationId: string,
+  targetStatus: 'CONFIRMED' | 'WAITLIST'
+): Promise<{
+  registration_id: string;
+  status: 'CONFIRMED' | 'WAITLIST';
+  seat_number?: number | null;
+  waitlist_position?: number | null;
+  message: string;
+}> {
+  const res = await fetch(`/api/admin/registrations/${registrationId}/status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ status: targetStatus }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error?.message || 'فشل تغيير حالة المتطوع');
+  }
+  return data.data;
+}
+
 export function getAudioPlaybackUrl(registrationId: string): string {
   return `/api/admin/registrations/${registrationId}/audio`;
 }
