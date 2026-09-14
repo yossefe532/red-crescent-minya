@@ -4,6 +4,7 @@ import { success, Errors } from '../utils/response';
 import { generateRegistrationId, generateUUID, generateAudioKey } from '../utils/id';
 import { logAudit } from '../services/audit.service';
 import { createNotificationEvent, processPendingNotifications } from '../services/notification_outbox';
+import { getOwnershipToken } from '../middleware/ownership';
 import { InlineKeyboard } from 'grammy';
 
 // ─── Telegram Notification Helpers ──────────────────────
@@ -327,12 +328,16 @@ publicRegistrationRoutes.post('/register', async (c) => {
     const audioKey = generateAudioKey(missionData.public_code, registrationId);
 
     // 7. Save registration as PENDING first (INSERT before seat allocation)
+    const ownershipToken = getOwnershipToken(c);
+    const idempotencyKey = ownershipToken && volunteerId
+      ? `${ownershipToken}:${missionData.id}:${volunteerId}` : null;
+
     await c.env.DB.prepare(
       `INSERT INTO registrations (
         id, mission_id, volunteer_id, status, seat_number, waitlist_position,
-        registration_sequence, request_id, created_at
-      ) VALUES (?, ?, ?, 'PENDING', NULL, NULL, ?, ?, datetime('now'))`
-    ).bind(registrationId, missionData.id, volunteerId, nextSeq, request_id || null).run();
+        registration_sequence, request_id, ownership_token, idempotency_key, created_at
+      ) VALUES (?, ?, ?, 'PENDING', NULL, NULL, ?, ?, ?, ?, datetime('now'))`
+    ).bind(registrationId, missionData.id, volunteerId, nextSeq, request_id || null, ownershipToken, idempotencyKey).run();
 
     // 8. Atomic seat allocation using conditional UPDATE.
     // Row now exists as PENDING — UPDATE can find it.

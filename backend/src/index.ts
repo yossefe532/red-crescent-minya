@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { debugLogger } from './middleware/debug';
+import { ownershipMiddleware } from './middleware/ownership';
 import { Env } from './env';
 import { success, error } from './utils/response';
 import { publicRoutes } from './routes/public';
@@ -8,6 +9,7 @@ import { adminRoutes } from './routes/admin';
 import { publicRegistrationRoutes } from './routes/registration';
 import { quickRoutes } from './routes/quick';
 import { telegramRoutes } from './routes/telegram';
+import { selfCancelRoutes } from './routes/self-cancel';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +39,9 @@ app.get('/health', (c) => {
 });
 
 // Public routes (mission info, volunteer lookup)
+app.use('/api/missions/*', ownershipMiddleware);
+app.use('/api/register*', ownershipMiddleware);
+app.use('/api/register-temporary', ownershipMiddleware);
 app.route('/api', publicRoutes);
 app.route('/api/public', publicRoutes);
 
@@ -45,6 +50,9 @@ app.route('/api', publicRegistrationRoutes);
 
 // Quick profile and temporary registration routes
 app.route('/api', quickRoutes);
+
+// Self-cancellation + my-registrations (ownership-authenticated)
+app.route('/api', selfCancelRoutes);
 
 // Admin routes (with authentication)
 app.route('/api/admin', adminRoutes);

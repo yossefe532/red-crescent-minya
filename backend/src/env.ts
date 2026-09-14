@@ -17,5 +17,6 @@ export type AppEnv = {
   Variables: {
     adminId: string;
     adminUsername: string;
+    ownership_token: string;
   };
 };

@@ -92,9 +92,9 @@ publicRoutes.get('/missions/:publicCode/registrations-live', async (c) => {
   try {
     const publicCode = c.req.param('publicCode');
     
-    const mission = await c.env.DB.prepare(`
-      SELECT id FROM missions WHERE public_code = ?
-    `).bind(publicCode).first();
+    const mission = await c.env.DB.prepare(
+      `SELECT id FROM missions WHERE public_code = ?`
+    ).bind(publicCode).first();
     
     if (!mission) {
       return Errors.notFound(c, 'Mission');
@@ -102,17 +102,37 @@ publicRoutes.get('/missions/:publicCode/registrations-live', async (c) => {
     
     const missionData = mission as any;
     
+    // Official registrations (with member_id)
     const result = await c.env.DB.prepare(`
       SELECT r.id, v.name, v.member_id, r.status, r.seat_number, 
-             r.waitlist_position, r.created_at
+             r.waitlist_position, r.created_at, 'OFFICIAL' as source
       FROM registrations r
       JOIN volunteers v ON v.id = r.volunteer_id
       WHERE r.mission_id = ?
       ORDER BY r.registration_sequence ASC
+      LIMIT 100
+    `).bind(missionData.id).all();
+    
+    // Temporary registrations (without member_id)
+    const tempResult = await c.env.DB.prepare(`
+      SELECT id, name, NULL as member_id, status, seat_number,
+             waitlist_position, created_at, 'TEMP' as source
+      FROM temporary_registrations
+      WHERE mission_id = ?
+      ORDER BY registration_sequence ASC
       LIMIT 50
     `).bind(missionData.id).all();
     
-    const registrations = (result.results || []).map((row: any) => ({
+    // Merge + sort by registration_sequence (approximate by created_at within source)
+    const allRegs = [
+      ...(result.results || []),
+      ...(tempResult.results || []),
+    ].sort((a: any, b: any) => {
+      // Within each source, original order is preserved; interleave by created_at
+      return (a.created_at || '').localeCompare(b.created_at || '');
+    }).slice(0, 100); // Hard limit
+    
+    const registrations = allRegs.map((row: any) => ({
       id: row.id,
       name: row.name,
       member_id: row.member_id,

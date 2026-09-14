@@ -203,11 +203,12 @@ quickRoutes.post('/register-temporary', async (c) => {
     }
 
     const tempId = generateUUID();
+    const tempOwnershipToken = c.req.header('Cookie')?.match(/ownership_token=([^;]+)/)?.[1] || null;
     await c.env.DB.prepare(
-      `INSERT INTO temporary_registrations 
-       (id, mission_id, name, phone, status, seat_number, waitlist_position, registration_sequence, created_at, confirmed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-    ).bind(tempId, missionData.id, name, phone, status, seatNumber, waitlistPosition, totalSeq).run();
+      `INSERT INTO temporary_registrations
+       (id, mission_id, name, phone, status, seat_number, waitlist_position, registration_sequence, ownership_token, created_at, confirmed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    ).bind(tempId, missionData.id, name, phone, status, seatNumber, waitlistPosition, totalSeq, tempOwnershipToken).run();
 
     return success(c, {
       registration_id: tempId,
