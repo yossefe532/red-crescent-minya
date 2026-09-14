@@ -1,13 +1,16 @@
-# LIVE IMPLEMENTATION RESULTS — Phase 6
+# LIVE IMPLEMENTATION RESULTS — Phase 6 & 7
 
 ## Summary
 
 Phase 6 transforms the mission registration page from static polling to a genuinely live page with version-based change detection, unified polling, connection state awareness, and a live participant roster.
 
+Phase 7 adds visual feedback: realtime notifications, activity strip, entry animations, count pulse, and mission-full alerts.
+
 ---
 
 ## Files Changed
 
+### Phase 6
 | File | Type | Description |
 |---|---|---|
 | `backend/migrations/0010_mission_version.sql` | NEW | Adds `version` column to missions table |
@@ -25,6 +28,15 @@ Phase 6 transforms the mission registration page from static polling to a genuin
 | `frontend/src/index.css` | MODIFIED | Added roster entry animation CSS |
 | `backend/tests/phase6_live_realtime.test.ts` | NEW | 24 Phase 6 tests |
 
+### Phase 7
+| File | Type | Description |
+|---|---|---|
+| `frontend/src/hooks/useLiveChanges.ts` | NEW | Change detection hook (register/cancel/promote/full) |
+| `frontend/src/components/ui/Toast.tsx` | MODIFIED | Added `'live'` toast type with green User icon |
+| `frontend/src/pages/MissionRegistration.tsx` | MODIFIED | Activity strip, live toasts, new entry highlight, count pulse |
+| `frontend/src/index.css` | MODIFIED | Added entry-highlight, count-pulse animations |
+| `backend/tests/phase7_live_ux.test.ts` | NEW | 30 tests (59 assertions) |
+
 ---
 
 ## Tests Run
@@ -36,7 +48,8 @@ Phase 6 transforms the mission registration page from static polling to a genuin
 | Phase 3 (Telegram Handlers) | 28 | 28 | 0 |
 | Phase 5 (Cancel/Restore) | 42 | 42 | 0 |
 | Phase 6 (Live Realtime) | 24 | 24 | 0 |
-| **TOTAL** | **156** | **156** | **0** |
+| Phase 7 (Live UX) | 59 | 59 | 0 |
+| **TOTAL** | **215** | **215** | **0** |
 
 ---
 
@@ -44,13 +57,13 @@ Phase 6 transforms the mission registration page from static polling to a genuin
 
 - ✅ Backend TypeScript: `npx tsc --noEmit` — clean
 - ✅ Frontend TypeScript: `npx tsc --noEmit` — clean
-- ✅ Frontend Build: `npm run build` — success (299.49 KB JS, 33.72 KB CSS)
+- ✅ Frontend Build: `npm run build` — success (303.22 KB JS, 34.34 KB CSS)
 
 ---
 
 ## Deployment Result
 
-- ✅ Backend: `npx wrangler deploy --env production` — version `65624327-102b-4c81-991a-29e9d4bcf308`
+- ✅ Backend: `npx wrangler deploy --env production` — version `86a3104b-1dac-4cbe-9d04-a11c1f466085`
 - ✅ Frontend: `npx wrangler pages deploy dist` — deployed
 
 ---
@@ -70,23 +83,15 @@ Phase 6 transforms the mission registration page from static polling to a genuin
 
 ---
 
-## Event Changes
-
-- No new event infrastructure
-- Version increment serves as implicit change signal
-- Existing notification_events table unchanged
-
----
-
 ## Polling Changes
 
-### Before
+### Before Phase 6
 - 4 separate polling mechanisms (3s + 1s + 3s + 3s)
 - ~4 requests per second per viewer
 - No change detection
 - No visibility API
 
-### After
+### After Phase 6
 - 1 unified polling endpoint (3s visible, 10s hidden)
 - ~1 request per 3 seconds per viewer
 - Version-based change detection
@@ -94,19 +99,50 @@ Phase 6 transforms the mission registration page from static polling to a genuin
 
 ---
 
-## Known Limitations
+## Phase 7 UX Features
 
-1. **No true push** — Still polling-based (Cloudflare Workers constraint)
-2. **3-second latency** — Max delay for live updates is the polling interval
-3. **No persistent connection** — Tab must be visible for updates
-4. **Version overflow** — The `version` column is INTEGER, will eventually overflow after ~2.1 billion increments (not a practical concern)
-5. **No SSE/WebSocket** — Would require Durable Objects, adding infrastructure complexity not justified by the use case
+### Notification System
+- **Registration**: "يوسف أيمن انضم إلى المهمة الآن"
+- **Cancellation**: "محمد ممدوح ألغى تسجيله"
+- **Promotion**: "تم ترقية عبدالرحمن من قائمة الانتظار"
+- **Mission Full**: "اكتمل العدد — المهمة مكتملة"
+
+### Activity Strip
+- Shows last 3 events in roster card header
+- Color-coded: green (register), red (cancel), yellow (promote)
+- Uses existing roster data (no extra API calls)
+
+### Animations
+- **New entry**: Slide-in + green highlight flash (0.3s + 2s)
+- **Count pulse**: Scale-up on capacity change (0.6s)
+- All respect `prefers-reduced-motion: reduce`
+
+### State Preservation
+- Recording state untouched by live events
+- Form input preserved across updates
+- No scroll jumps
+- No focus changes
 
 ---
 
-## Git Commit
+## Git Commits
 
 ```
+fff Phase 7: Live UX, Notifications & Visual Feedback
+ 6 files changed, 943 insertions(+), 9 deletions(-)
+
 140dfaf Phase 6: Live Mission, Realtime & Live Roster
-15 files changed, 1030 insertions(+), 109 deletions(-)
+ 15 files changed, 1030 insertions(+), 109 deletions(-)
 ```
+
+---
+
+## Known Limitations
+
+1. **No true push** — Still polling-based (Cloudflare Workers constraint)
+2. **3-second latency** — Max delay for live updates is polling interval
+3. **No persistent connection** — Tab must be visible for updates
+4. **Version overflow** — INTEGER column, overflow after ~2.1B increments (not practical)
+5. **Toast stacking** — Max 5 visible; rapid storms may drop older notifications
+6. **Activity strip ephemeral** — Events disappear on page reload (no persistent log)
+7. **No mobile push** — Would require service worker + Push API
