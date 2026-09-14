@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckCircle2, CircleAlert, Info, TriangleAlert, X } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Info, TriangleAlert, User, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type ToastType = 'success' | 'error' | 'warning' | 'info';
+export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'live';
 
 export interface ToastItem {
   id: number;
@@ -17,6 +17,7 @@ interface ToastContextValue {
   error: (message: string) => void;
   warning: (message: string) => void;
   info: (message: string) => void;
+  live: (message: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -37,6 +38,10 @@ const toastStyles: Record<ToastType, { icon: React.ReactNode; ring: string }> = 
   info: {
     icon: <Info className="h-5 w-5 text-info-600" aria-hidden="true" />,
     ring: 'ring-info-500/30',
+  },
+  live: {
+    icon: <User className="h-5 w-5 text-success-600" aria-hidden="true" />,
+    ring: 'ring-success-500/30',
   },
 };
 
@@ -65,6 +70,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       error: (m) => push('error', m),
       warning: (m) => push('warning', m),
       info: (m) => push('info', m),
+      live: (m) => push('live', m),
     }),
     [push]
   );

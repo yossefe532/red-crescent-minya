@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   HeartPulse,
@@ -22,6 +22,8 @@ import {
   Trash2,
   Wifi,
   WifiOff,
+  Activity,
+  User,
 } from 'lucide-react';
 import {
   getMission,
@@ -36,6 +38,7 @@ import {
   LiveMyRegistration,
 } from '../api/public';
 import { useLiveMission, ConnectionState } from '../hooks/useLiveMission';
+import { useLiveChanges } from '../hooks/useLiveChanges';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Badge from '@/components/ui/Badge';
@@ -48,7 +51,7 @@ import { useToast } from '@/components/ui/Toast';
 
 export function MissionRegistration() {
   const { code } = useParams<{ code: string }>();
-  const { success: toastSuccess, error: toastError } = useToast();
+  const { success: toastSuccess, error: toastError, live: toastLive } = useToast();
 
   // ── Phase 6: Unified live hook replaces 4 separate polling mechanisms ──
   const {
@@ -59,6 +62,53 @@ export function MissionRegistration() {
     connectionState,
     refresh: refreshLive,
   } = useLiveMission(code || '');
+
+  // ── Phase 7: Change detection + live notifications ──
+  const [countPulseKey, setCountPulseKey] = useState(0);
+
+  const handleRegistered = useCallback(
+    (evt: { name: string }) => {
+      toastLive(`${evt.name} انضم إلى المهمة الآن`);
+    },
+    [toastLive]
+  );
+
+  const handleCancelled = useCallback(
+    (evt: { name: string }) => {
+      toastLive(`${evt.name} ألغى تسجيله`);
+    },
+    [toastLive]
+  );
+
+  const handlePromoted = useCallback(
+    (evt: { name: string }) => {
+      toastLive(`تم ترقية ${evt.name} من قائمة الانتظار`);
+    },
+    [toastLive]
+  );
+
+  const handleMissionFull = useCallback(() => {
+    toastLive('اكتمل العدد — المهمة مكتملة');
+  }, [toastLive]);
+
+  const { newEntryIds, recentEvents } = useLiveChanges({
+    registrations: liveRegistrations,
+    mission: liveMission,
+    version: liveVersion,
+    onRegistered: handleRegistered,
+    onCancelled: handleCancelled,
+    onPromoted: handlePromoted,
+    onMissionFull: handleMissionFull,
+  });
+
+  // Count pulse animation — trigger when confirmed count changes
+  const prevConfirmedRef = useRef(liveMission?.confirmed);
+  useEffect(() => {
+    if (liveMission && prevConfirmedRef.current !== undefined && liveMission.confirmed !== prevConfirmedRef.current) {
+      setCountPulseKey((k) => k + 1);
+    }
+    prevConfirmedRef.current = liveMission?.confirmed;
+  }, [liveMission?.confirmed]);
 
   // Local mission state for initial load + error handling
   const [loadingMission, setLoadingMission] = useState(true);
@@ -562,7 +612,7 @@ export function MissionRegistration() {
             <Badge variant="brand" className="font-mono">{mission.public_code}</Badge>
             <div className="flex items-center gap-1.5">
               <Circle className={cn('h-2.5 w-2.5 fill-current', mission.available > 0 ? 'text-success-500' : 'text-warning-500')} />
-              <span className="text-xs font-semibold text-slate-600">
+              <span key={countPulseKey} className={cn('text-xs font-semibold text-slate-600', countPulseKey > 0 && 'count-pulse')}>
                 {mission.available > 0 ? `${mission.available} مكان متاح من ${mission.capacity}` : 'المقاعد مكتملة (انتظار)'}
               </span>
             </div>
@@ -590,7 +640,7 @@ export function MissionRegistration() {
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <Circle className="h-2 w-2 fill-success-500 text-success-500 animate-pulse" />
                 المسجلون
-                <span className="text-xs font-normal text-slate-400">({liveRegistrations.length})</span>
+                <span key={countPulseKey} className={cn('text-xs font-normal text-slate-400', countPulseKey > 0 && 'count-pulse')}>({liveRegistrations.length})</span>
               </h3>
               <div className="flex items-center gap-2">
                 {/* Connection state indicator */}
@@ -608,6 +658,32 @@ export function MissionRegistration() {
                 )}
               </div>
             </div>
+            {/* ── Phase 7: Live Activity Strip ── */}
+            {recentEvents.length > 0 && (
+              <div className="px-4 py-2.5 border-b border-slate-100 bg-brand-50/30">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Activity className="h-3 w-3 text-brand-500" />
+                  <span className="text-[10px] font-bold text-brand-700">آخر التسجيلات الآن</span>
+                </div>
+                <div className="space-y-1">
+                  {recentEvents.slice(0, 3).map((evt, i) => (
+                    <div key={`${evt.registrationId}-${evt.timestamp}`} className="flex items-center gap-2 text-[10px]">
+                      <span className={cn(
+                        'h-1.5 w-1.5 rounded-full shrink-0',
+                        evt.type === 'registered' && 'bg-success-500',
+                        evt.type === 'cancelled' && 'bg-danger-400',
+                        evt.type === 'promoted' && 'bg-warning-500',
+                      )} />
+                      <span className="text-slate-600 font-medium">
+                        {evt.type === 'registered' && `${evt.name} — الآن`}
+                        {evt.type === 'cancelled' && `${evt.name} — ألغى`}
+                        {evt.type === 'promoted' && `${evt.name} — تمت الترقية`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Desktop table */}
             <div className="hidden sm:block overflow-x-auto max-h-64 overflow-y-auto">
               <table className="w-full text-right text-[11px]">
@@ -623,7 +699,7 @@ export function MissionRegistration() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {liveRegistrations.map((reg, idx) => (
-                    <tr key={reg.id} className={cn('roster-row', idx === 0 && 'bg-success-50/50')}>
+                    <tr key={reg.id} className={cn(newEntryIds.has(reg.id) ? 'roster-row-new' : 'roster-row', idx === 0 && 'bg-success-50/50')}>
                       <td className="py-1.5 px-2 font-mono font-bold text-slate-400">{idx + 1}</td>
                       <td className="py-1.5 px-2 font-bold text-slate-900">{reg.name}</td>
                       <td className="py-1.5 px-2 font-mono text-slate-700">{reg.member_id}</td>
@@ -642,7 +718,7 @@ export function MissionRegistration() {
             {/* Mobile compact list */}
             <div className="sm:hidden max-h-64 overflow-y-auto">
               {liveRegistrations.map((reg, idx) => (
-                <div key={reg.id} className={cn('roster-row flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-b-0', idx === 0 && 'bg-success-50/30')}>
+                <div key={reg.id} className={cn(newEntryIds.has(reg.id) ? 'roster-row-new' : 'roster-row', 'flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-b-0', idx === 0 && 'bg-success-50/30')}>
                   <span className="text-xs font-mono font-bold text-slate-400 w-6 text-center shrink-0">
                     {String(idx + 1).padStart(2, '0')}
                   </span>
