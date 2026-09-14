@@ -90,6 +90,7 @@ export interface Registration {
   phrase: string | null;
   duration_ms: number | null;
   has_audio_data: number | boolean;
+  original_status: 'CONFIRMED' | 'WAITLIST' | null;
 }
 
 // ------- Auth API -------
@@ -247,6 +248,24 @@ export async function cancelRegistration(registrationId: string): Promise<{
   const data = await res.json();
   if (!res.ok || !data.success) {
     throw new Error(data.error?.message || 'فشل إلغاء التسجيل');
+  }
+  return data.data;
+}
+
+// Restore a cancelled registration (admin)
+export async function restoreRegistration(registrationId: string): Promise<{
+  restored_registration_id: string;
+  new_status: 'CONFIRMED' | 'WAITLIST';
+  new_seat_number: number | null;
+  message: string;
+}> {
+  const res = await fetch(`/api/admin/registrations/${registrationId}/restore`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error?.message || 'فشل استرجاع التسجيل');
   }
   return data.data;
 }

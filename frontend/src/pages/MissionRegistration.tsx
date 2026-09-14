@@ -19,6 +19,7 @@ import {
   UserRound,
   Phone,
   Hash,
+  Trash2,
 } from 'lucide-react';
 import {
   getMission,
@@ -26,8 +27,11 @@ import {
   saveQuickProfile,
   submitRegistration,
   submitTemporaryRegistration,
+  getMyRegistrations,
+  selfCancelRegistration,
   Mission,
   RegistrationResult,
+  MyRegistration,
 } from '../api/public';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -37,6 +41,7 @@ import StatusBadge from '@/components/ui/StatusBadge';
 import LoadingState from '@/components/ui/LoadingState';
 import ErrorState from '@/components/ui/ErrorState';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/Toast';
 
 interface LiveVolunteer {
   id: string;
@@ -50,6 +55,7 @@ interface LiveVolunteer {
 
 export function MissionRegistration() {
   const { code } = useParams<{ code: string }>();
+  const { success: toastSuccess, error: toastError } = useToast();
 
   const [mission, setMission] = useState<Mission | null>(null);
   const [loadingMission, setLoadingMission] = useState(true);
@@ -79,6 +85,11 @@ export function MissionRegistration() {
   const [result, setResult] = useState<RegistrationResult | null>(null);
   const [successMode, setSuccessMode] = useState<'result' | 'quick-save' | 'quick-save-success'>('result');
   const [completed, setCompleted] = useState(false);
+
+  // Self-cancel state
+  const [myRegistrations, setMyRegistrations] = useState<MyRegistration[]>([]);
+  const [cancellingMyRegId, setCancellingMyRegId] = useState<string | null>(null);
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
   // 1. Fetch Mission Info
   const fetchMissionData = async (isInitial = false) => {
@@ -149,6 +160,36 @@ export function MissionRegistration() {
     const interval = setInterval(fetchLiveRegistrations, 3000);
     return () => clearInterval(interval);
   }, [code]);
+
+  // 2b. My Registrations polling (ownership-based self-cancel)
+  const fetchMyRegistrations = async () => {
+    if (!code) return;
+    try {
+      const regs = await getMyRegistrations(code);
+      setMyRegistrations(regs);
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchMyRegistrations();
+    const interval = setInterval(fetchMyRegistrations, 3000);
+    return () => clearInterval(interval);
+  }, [code]);
+
+  // Self-cancel handler
+  const doSelfCancel = async (regId: string) => {
+    setCancellingMyRegId(regId);
+    try {
+      const result = await selfCancelRegistration(regId);
+      toastSuccess(result.message || 'تم إلغاء التسجيل بنجاح');
+      setConfirmCancelId(null);
+      fetchMyRegistrations();
+    } catch (err: any) {
+      toastError(err.message || 'فشل إلغاء التسجيل');
+    } finally {
+      setCancellingMyRegId(null);
+    }
+  };
 
   // 3. Quick Profile Lookup debounce
   useEffect(() => {
@@ -585,6 +626,83 @@ export function MissionRegistration() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </Card>
+        )}
+
+        {/* ========== MY REGISTRATIONS (Self-Cancel) ========== */}
+        {myRegistrations.length > 0 && (
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <UserRound className="h-4 w-4 text-brand-600" />
+              <h3 className="text-base font-bold text-slate-900">تسجيلاتك</h3>
+              <span className="text-xs text-slate-400 font-medium">({myRegistrations.length})</span>
+            </div>
+            <div className="space-y-3">
+              {myRegistrations.map((reg) => {
+                const isActive = reg.status === 'CONFIRMED' || reg.status === 'WAITLIST';
+                const isCancelled = reg.status === 'CANCELLED';
+                const isCancelling = cancellingMyRegId === reg.id;
+                const showConfirm = confirmCancelId === reg.id;
+                return (
+                  <div
+                    key={reg.id}
+                    className={cn(
+                      'rounded-xl border p-4 transition-colors',
+                      isCancelled ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200'
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-bold text-slate-900">{reg.name}</span>
+                          <StatusBadge status={reg.status} className="!text-[10px] !px-1.5 !py-0.5" />
+                        </div>
+                        <div className="text-xs text-slate-500 space-y-0.5">
+                          {reg.member_id && <p>رقم العضوية: <span className="font-mono font-bold">{reg.member_id}</span></p>}
+                          {reg.status === 'CONFIRMED' && reg.seat_number && <p>رقم المقعد: <span className="font-mono font-bold text-success-600">#{reg.seat_number}</span></p>}
+                          {reg.status === 'WAITLIST' && reg.waitlist_position && <p>موقع في الانتظار: <span className="font-mono font-bold text-warning-600">#{reg.waitlist_position}</span></p>}
+                          <p>تاريخ التسجيل: <span className="font-mono">{new Date(reg.created_at).toLocaleString('ar-EG')}</span></p>
+                        </div>
+                      </div>
+                      {isActive && !showConfirm && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setConfirmCancelId(reg.id)}
+                          className="text-danger-600 hover:text-danger-700 hover:bg-danger-50 shrink-0"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span className="text-xs">إلغاء</span>
+                        </Button>
+                      )}
+                      {isActive && showConfirm && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            loading={isCancelling}
+                            onClick={() => doSelfCancel(reg.id)}
+                          >
+                            تأكيد الإلغاء
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmCancelId(null)}
+                            disabled={isCancelling}
+                          >
+                            لا
+                          </Button>
+                        </div>
+                      )}
+                      {isCancelled && (
+                        <span className="text-xs text-slate-400 font-medium">ملغى</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </Card>
         )}

@@ -57,6 +57,7 @@ export async function cancelRegistration(
     .prepare(
       `UPDATE registrations
        SET status = 'CANCELLED',
+           seat_number = NULL,
            cancelled_at = datetime('now'),
            cancelled_by = ?,
            original_status = CASE WHEN original_status IS NULL THEN ? ELSE original_status END

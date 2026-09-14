@@ -253,16 +253,22 @@ export async function executeCancelRegistration(
   }
 
   try {
-    // Step 1: Cancel the registration
-    await updateRegistrationStatus(
-      db,
-      regId,
-      'CANCELLED',
-      null, // seat_number
-      null, // waitlist_position
-      null, // confirmed_at
-      new Date().toISOString() // cancelled_at
-    );
+    // Step 1: Cancel the registration (preserve original_status for restore)
+    await db.prepare(
+      `UPDATE registrations
+       SET status = 'CANCELLED',
+           seat_number = NULL,
+           waitlist_position = NULL,
+           confirmed_at = NULL,
+           cancelled_at = ?,
+           cancelled_by = 'telegram',
+           original_status = CASE WHEN original_status IS NULL THEN ? ELSE original_status END
+       WHERE id = ?`
+    ).bind(
+      new Date().toISOString(),
+      reg.status, // preserve original status
+      regId
+    ).run();
 
     // Step 2: If it was a confirmed seat, promote the first waitlist volunteer
     let promotedVolunteer = null;

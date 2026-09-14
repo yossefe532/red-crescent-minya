@@ -20,6 +20,7 @@ import {
   Clock3,
   Trash2,
   Loader2,
+  RotateCcw,
 } from 'lucide-react';
 import AdminShell from '@/components/layout/AdminShell';
 import Button from '@/components/ui/Button';
@@ -46,6 +47,7 @@ import {
   createMission,
   getMissionRegistrations,
   cancelRegistration,
+  restoreRegistration,
   moveRegistrationStatus,
   fetchAudioPlaybackUrl,
   getExportCsvUrl,
@@ -96,6 +98,8 @@ export function AdminDashboard(_props: Props) {
   // === NEW: Confirm dialog state ===
   const [confirmCancel, setConfirmCancel] = useState<Registration | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmRestore, setConfirmRestore] = useState<Registration | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const [movingStatus, setMovingStatus] = useState<string | null>(null); // registrationId being moved
 
   // === ALL ORIGINAL HANDLERS — UNTOUCHED ===
@@ -256,6 +260,29 @@ export function AdminDashboard(_props: Props) {
       toastError(err.message || 'فشل إلغاء التسجيل');
     } finally {
       setCancelling(false);
+    }
+  };
+
+  // Restore cancelled registration
+  const confirmRestoreRegistration = (reg: Registration) => {
+    setConfirmRestore(reg);
+  };
+
+  const doRestoreRegistration = async () => {
+    if (!confirmRestore) return;
+    setRestoring(true);
+    try {
+      const res = await restoreRegistration(confirmRestore.id);
+      toastSuccess(res.message);
+      setConfirmRestore(null);
+      if (selectedMission) {
+        await loadRegistrations(selectedMission.id);
+        await loadMissionsList();
+      }
+    } catch (err: any) {
+      toastError(err.message || 'فشل استرجاع التسجيل');
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -763,6 +790,17 @@ export function AdminDashboard(_props: Props) {
                                       إلغاء التسجيل
                                     </Button>
                                   )}
+                                  {isCancelled && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => confirmRestoreRegistration(reg)}
+                                      className="text-success-600 hover:text-success-700 hover:bg-success-50 text-[11px]"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                      استعادة
+                                    </Button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -848,6 +886,17 @@ export function AdminDashboard(_props: Props) {
                                 >
                                   <Trash2 className="h-3 w-3" />
                                   إلغاء
+                                </Button>
+                              )}
+                              {isCancelled && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => confirmRestoreRegistration(reg)}
+                                  className="text-success-600 hover:bg-success-50 text-xs"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  استعادة
                                 </Button>
                               )}
                             </div>
@@ -1036,6 +1085,19 @@ export function AdminDashboard(_props: Props) {
         loading={cancelling}
         onConfirm={doCancelRegistration}
         onCancel={() => setConfirmCancel(null)}
+      />
+
+      {/* ========== RESTORE CONFIRM DIALOG ========== */}
+      <ConfirmDialog
+        open={!!confirmRestore}
+        title="استرجاع التسجيل"
+        message={`هل أنت متأكد من استرجاع تسجيل المتطوع "${confirmRestore?.volunteer_name}"؟ سيتم إعادته إلى${confirmRestore?.original_status === 'CONFIRMED' ? ' المقاعد المؤكدة' : ' قائمة الانتظار'} حسب التوفر.`}
+        confirmLabel="نعم، استرجاع التسجيل"
+        cancelLabel="إلغاء"
+        variant="default"
+        loading={restoring}
+        onConfirm={doRestoreRegistration}
+        onCancel={() => setConfirmRestore(null)}
       />
 
       {/* ========== MISSION CONTROL PANEL ========== */}
