@@ -115,3 +115,38 @@ export async function submitTemporaryRegistration(payload: {
   }
   return data.data;
 }
+
+// ── My Registrations (ownership-based) ──
+export interface MyRegistration {
+  id: string;
+  name: string;
+  member_id: string | null;
+  status: string;
+  seat_number: number | null;
+  waitlist_position: number | null;
+  registration_sequence: number;
+  created_at: string;
+  cancelled_at: string | null;
+}
+
+export async function getMyRegistrations(publicCode: string): Promise<MyRegistration[]> {
+  const res = await fetch(`${API_BASE}/missions/${publicCode}/my-registrations`);
+  const data = await res.json();
+  if (!data.success) return [];
+  return data.data || [];
+}
+
+export async function selfCancelRegistration(regId: string): Promise<{
+  cancelled_registration_id: string;
+  promoted_volunteer: { registration_id: string; name: string; new_seat_number: number } | null;
+  message: string;
+}> {
+  const res = await fetch(`${API_BASE}/registrations/${regId}/self-cancel`, {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'فشل إلغاء التسجيل');
+  }
+  return data.data;
+}

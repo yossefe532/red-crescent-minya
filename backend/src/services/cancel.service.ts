@@ -69,6 +69,7 @@ export async function cancelRegistration(
   let promotedVolunteer: CancelResult['promoted_volunteer'] = null;
 
   if (statusBefore === 'CONFIRMED' && r.seat_number) {
+    // Try promotions from registrations first
     const firstWaitlist = await db
       .prepare(
         `SELECT r.id, r.waitlist_position, v.name, v.member_id
@@ -113,10 +114,54 @@ export async function cancelRegistration(
         member_id: wl.member_id,
         new_seat_number: r.seat_number,
       };
+    } else {
+      // No waitlist in registrations → try temporary_registrations
+      const firstTempWaitlist = await db
+        .prepare(
+          `SELECT id, waitlist_position, name
+           FROM temporary_registrations
+           WHERE mission_id = ? AND status = 'WAITLIST'
+           ORDER BY waitlist_position ASC
+           LIMIT 1`,
+        )
+        .bind(missionId)
+        .first();
+
+      if (firstTempWaitlist) {
+        const twl = firstTempWaitlist as any;
+
+        await db
+          .prepare(
+            `UPDATE temporary_registrations
+             SET status = 'CONFIRMED',
+                 seat_number = ?,
+                 waitlist_position = NULL,
+                 confirmed_at = datetime('now')
+             WHERE id = ?`,
+          )
+          .bind(r.seat_number, twl.id)
+          .run();
+
+        await db
+          .prepare(
+            `UPDATE temporary_registrations
+             SET waitlist_position = waitlist_position - 1
+             WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?`,
+          )
+          .bind(missionId, twl.waitlist_position)
+          .run();
+
+        promotedVolunteer = {
+          registration_id: twl.id,
+          name: twl.name,
+          member_id: 'TEMP',
+          new_seat_number: r.seat_number,
+        };
+      }
     }
   }
 
-  // 4. Reorder waitlist if was on waitlist
+  // 4. Reorder waitlist if was on waitlist (in registrations)
   if (statusBefore === 'WAITLIST' && r.waitlist_position) {
     await db
       .prepare(

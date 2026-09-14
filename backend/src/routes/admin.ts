@@ -420,82 +420,38 @@ adminRoutes.get('/missions/:id/registrations', adminAuth, async (c) => {
 adminRoutes.post('/registrations/:regId/cancel', adminAuth, async (c) => {
   try {
     const regId = c.req.param('regId') as string;
-
-    // Look up registration to get mission_id
-    const reg = await c.env.DB.prepare(
-      `SELECT id, mission_id, status, seat_number FROM registrations WHERE id = ?`
-    ).bind(regId).first();
-
-    if (!reg) {
-      return Errors.notFound(c, 'Registration');
-    }
-    const regData = reg as any;
-
-    if (regData.status === 'CANCELLED') {
-      return Errors.conflict(c, 'التسجيل ملغي بالفعل');
-    }
-
-    const missionId = regData.mission_id;
-
-    // Cancel the registration
-    await c.env.DB.prepare(
-      `UPDATE registrations 
-       SET status = 'CANCELLED', cancelled_at = datetime('now')
-       WHERE id = ?`
-    ).bind(regId).run();
-
-    // If it was a confirmed seat, promote first waitlist volunteer
-    let promotedVolunteer = null;
-    if (regData.status === 'CONFIRMED' && regData.seat_number) {
-      const firstWaitlist = await c.env.DB.prepare(
-        `SELECT r.id, r.waitlist_position, v.name as volunteer_name, v.member_id FROM registrations r
-         JOIN volunteers v ON v.id = r.volunteer_id
-         WHERE r.mission_id = ? AND r.status = 'WAITLIST'
-         ORDER BY r.waitlist_position ASC
-         LIMIT 1`
-      ).bind(missionId).first();
-
-      if (firstWaitlist) {
-        const wlData = firstWaitlist as any;
-        await c.env.DB.prepare(
-          `UPDATE registrations 
-           SET status = 'CONFIRMED', seat_number = ?, waitlist_position = NULL, confirmed_at = datetime('now')
-           WHERE id = ?`
-        ).bind(regData.seat_number, wlData.id).run();
-
-        // Reorder remaining waitlist
-        await c.env.DB.prepare(
-          `UPDATE registrations 
-           SET waitlist_position = waitlist_position - 1
-           WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?`
-        ).bind(missionId, wlData.waitlist_position).run();
-
-        promotedVolunteer = {
-          name: wlData.volunteer_name,
-          member_id: wlData.member_id,
-          new_seat_number: regData.seat_number,
-        };
-      }
-    }
-
     const adminId = getAdminId(c);
+
+    const { cancelRegistration } = await import('../services/cancel.service');
+    const result = await cancelRegistration(c.env.DB, regId, 'admin');
+
+    // Audit log
     await logAudit(c.env.DB, {
       actorId: adminId,
       actorType: 'admin',
       action: 'REGISTRATION_CANCELLED',
       entityType: 'registration',
       entityId: regId,
-      metadata: { missionId, seatNumber: regData.seat_number },
+      metadata: {
+        mission_id: (result as any).mission_id,
+        seat_number: result.seat_number,
+      },
     });
 
     return success(c, {
       cancelled_registration_id: regId,
-      promoted_volunteer: promotedVolunteer,
-      message: promotedVolunteer 
-        ? `تم إلغاء التسجيل وترقية ${promotedVolunteer.name} للقائمة المؤكدة`
+      promoted_volunteer: result.promoted_volunteer,
+      message: result.promoted_volunteer
+        ? `تم إلغاء التسجيل وترقية ${result.promoted_volunteer.name} للقائمة المؤكدة`
         : 'تم إلغاء التسجيل بنجاح',
     });
   } catch (err: any) {
+    if (err.message === 'ALREADY_CANCELLED') {
+      return Errors.conflict(c, 'التسجيل ملغي بالفعل');
+    }
+    if (err.message === 'REGISTRATION_NOT_FOUND') {
+      return Errors.notFound(c, 'Registration');
+    }
     console.error('Cancel registration error:', err);
     return Errors.internal(c);
   }
@@ -643,66 +599,10 @@ adminRoutes.post('/missions/:id/cancel/:regId', adminAuth, async (c) => {
     const regId = c.req.param('regId') as string;
 
     const mission = await getMissionById(c.env.DB, missionId);
-    if (!mission) {
-      return Errors.notFound(c, 'Mission');
-    }
+    if (!mission) return Errors.notFound(c, 'Mission');
 
-    // Check if registration exists
-    const reg = await c.env.DB.prepare(
-      `SELECT id, status, seat_number FROM registrations WHERE id = ? AND mission_id = ?`
-    )
-      .bind(regId, missionId)
-      .first();
-
-    if (!reg) {
-      return Errors.notFound(c, 'Registration');
-    }
-
-    const regData = reg as any;
-    if (regData.status === 'CANCELLED') {
-      return Errors.conflict(c, 'التسجيل ملغي بالفعل');
-    }
-
-    // Cancel the registration
-    await c.env.DB.prepare(
-      `UPDATE registrations 
-       SET status = 'CANCELLED', cancelled_at = datetime('now')
-       WHERE id = ?`
-    )
-      .bind(regId)
-      .run();
-
-    // If it was a confirmed seat, promote first waitlist volunteer
-    if (regData.status === 'CONFIRMED' && regData.seat_number) {
-      const firstWaitlist = await c.env.DB.prepare(
-        `SELECT id, waitlist_position FROM registrations 
-         WHERE mission_id = ? AND status = 'WAITLIST'
-         ORDER BY waitlist_position ASC
-         LIMIT 1`
-      )
-        .bind(missionId)
-        .first();
-
-      if (firstWaitlist) {
-        const wlData = firstWaitlist as any;
-        await c.env.DB.prepare(
-          `UPDATE registrations 
-           SET status = 'CONFIRMED', seat_number = ?, waitlist_position = NULL, confirmed_at = datetime('now')
-           WHERE id = ?`
-        )
-          .bind(regData.seat_number, wlData.id)
-          .run();
-
-        // Reorder remaining waitlist
-        await c.env.DB.prepare(
-          `UPDATE registrations 
-           SET waitlist_position = waitlist_position - 1
-           WHERE mission_id = ? AND status = 'WAITLIST' AND waitlist_position > ?`
-        )
-          .bind(missionId, wlData.waitlist_position)
-          .run();
-      }
-    }
+    const { cancelRegistration } = await import('../services/cancel.service');
+    const result = await cancelRegistration(c.env.DB, regId, 'admin');
 
     const adminId = getAdminId(c);
     await logAudit(c.env.DB, {
@@ -711,11 +611,21 @@ adminRoutes.post('/missions/:id/cancel/:regId', adminAuth, async (c) => {
       action: 'REGISTRATION_CANCELLED',
       entityType: 'registration',
       entityId: regId,
-      metadata: { missionId, seatNumber: regData.seat_number },
+      metadata: { missionId, seat_number: result.seat_number },
     });
 
-    return success(c, { message: 'تم إلغاء التسجيل بنجاح' });
+    return success(c, {
+      cancelled_registration_id: regId,
+      promoted_volunteer: result.promoted_volunteer,
+      message: 'تم إلغاء التسجيل بنجاح',
+    });
   } catch (err: any) {
+    if (err.message === 'ALREADY_CANCELLED') {
+      return Errors.conflict(c, 'التسجيل ملغي بالفعل');
+    }
+    if (err.message === 'REGISTRATION_NOT_FOUND') {
+      return Errors.notFound(c, 'Registration');
+    }
     console.error('Cancel registration error:', err);
     return Errors.internal(c);
   }
@@ -840,6 +750,78 @@ adminRoutes.get('/registrations/:regId/audio', adminAuth, async (c) => {
     return new Response(body as BodyInit, { headers });
   } catch (err: any) {
     console.error('Get audio error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// POST /api/admin/registrations/:regId/restore — Restore a cancelled registration
+adminRoutes.post('/registrations/:regId/restore', adminAuth, async (c) => {
+  try {
+    const regId = c.req.param('regId') as string;
+    const adminId = getAdminId(c);
+
+    const reg = await c.env.DB.prepare(
+      `SELECT id, status FROM registrations WHERE id = ?`
+    ).bind(regId).first();
+
+    if (!reg) return Errors.notFound(c, 'Registration');
+    if ((reg as any).status !== 'CANCELLED') {
+      return Errors.conflict(c, 'لا يمكن استرجاع تسجيل غير ملغي');
+    }
+
+    const { restoreRegistration } = await import('../services/restore.service');
+    const result = await restoreRegistration(c.env.DB, regId, adminId);
+
+    // Queue Telegram notification
+    try {
+      const chatId = (c.env.ADMIN_CHAT_IDS || '').split(',')[0].trim();
+      if (chatId) {
+        const regFull = await c.env.DB.prepare(
+          `SELECT r.id, r.mission_id, v.name, m.title, m.public_code
+           FROM registrations r
+           JOIN volunteers v ON v.id = r.volunteer_id
+           JOIN missions m ON r.mission_id = m.id
+           WHERE r.id = ?`
+        ).bind(regId).first();
+
+        if (regFull) {
+          const rf = regFull as any;
+          let text = `✅ <b>استرجاع تسجيل</b>\n\n`;
+          text += `👤 الاسم: ${rf.name}\n`;
+          text += `📋 المهمة: ${rf.public_code} (${rf.title})\n`;
+          text += `📊 الحالة الجديدة: ${result.restored_status}`;
+
+          if (result.revoked_promotion) {
+            text += `\n\n⚠️ تم إلغاء ترقية ${result.revoked_promotion.name} (${result.revoked_promotion.registration_id})`;
+          }
+
+          const { createNotificationEvent } = await import('../services/notification_outbox');
+          await createNotificationEvent(c.env.DB, {
+            eventType: 'REGISTRATION_RESTORED',
+            registrationId: regId,
+            missionId: rf.mission_id,
+            adminChatId: chatId,
+            payload: JSON.stringify({ text, chat_id: chatId }),
+          });
+        }
+      }
+    } catch (outboxErr) {
+      console.error('[OUTBOX] Failed to queue restore notification:', outboxErr);
+    }
+
+    return success(c, {
+      restored_registration_id: regId,
+      restored_status: result.restored_status,
+      revoked_promotion: result.revoked_promotion,
+      message: result.revoked_promotion
+        ? `تم استرجاع التسجيل (${result.restored_status}) وإلغاء ترقية ${result.revoked_promotion.name}`
+        : `تم استرجاع التسجيل بنجاح (${result.restored_status})`,
+    });
+  } catch (err: any) {
+    if (err.message === 'NOT_CANCELLED') {
+      return Errors.conflict(c, 'لا يمكن استرجاع تسجيل غير ملغي');
+    }
+    console.error('Restore registration error:', err);
     return Errors.internal(c);
   }
 });
