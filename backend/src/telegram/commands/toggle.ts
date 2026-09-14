@@ -7,6 +7,7 @@ import { statusLabel, regStatusLabel, formatDate, formatDateShort, formatMission
 import { mainMenuKeyboard, missionListKeyboard, missionDetailKeyboard, volunteerActionsKeyboard, skipButtonKeyboard, cancelWizardKeyboard, createConfirmKeyboard, confirmActionKeyboard, editFieldKeyboard, notificationSettingsKeyboard, backToMissionKeyboard, backToHomeKeyboard, missionPickerKeyboard } from '../keyboards';
 import { getMissionById, updateMission } from '../../services/mission.service';
 import { logAudit } from '../../services/audit.service';
+import { incrementMissionVersion } from '../../utils/version';
 
 export async function handleToggleRegistration(
   token: string,
@@ -74,6 +75,9 @@ export async function handleToggleRegistration(
       entityType: 'mission',
       entityId: missionId,
     });
+
+    // Phase 6: Increment mission version for live change detection
+    await incrementMissionVersion(db, missionId);
 
     await tgSend(token, chatId,
       `${open ? '🟢' : '🔴'} <b>تم ${open ? 'فتح' : 'إغلاق'} التسجيل!</b>\n\n` +

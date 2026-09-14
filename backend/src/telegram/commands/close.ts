@@ -5,6 +5,7 @@
 import { tgSend } from '../bot';
 import { getMissionById, updateMission } from '../../services/mission.service';
 import { logAudit } from '../../services/audit.service';
+import { incrementMissionVersion } from '../../utils/version';
 import { missionDetailKeyboard } from '../keyboards';
 
 export async function handleCloseMission(
@@ -37,6 +38,9 @@ export async function handleCloseMission(
     entityType: 'mission',
     entityId: missionId,
   });
+
+  // Phase 6: Increment mission version for live change detection
+  await incrementMissionVersion(db, missionId);
 
   await tgSend(token, chatId,
     `🔒 <b>تم إغلاق التسجيل!</b>\n\n📋 <b>${mission.title}</b> (${mission.public_code})\n📊 الحالة الجديدة: مغلقة`,

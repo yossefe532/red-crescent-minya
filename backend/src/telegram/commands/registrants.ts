@@ -309,6 +309,9 @@ export async function handleVolunteerMove(
       metadata: { missionId: reg.mission_id, seatNumber: newSeat }
     });
 
+    // Phase 6: Increment mission version for live change detection
+    await incrementMissionVersion(db, reg.mission_id);
+
     await tgSend(token, chatId,
       `✅ تأكيد المتطوع <b>${escapeHtml(reg.name)}</b> في مهمة <b>${escapeHtml(reg.title)}</b> (${reg.public_code})\n💺 المقعد: ${newSeat}`,
       { reply_markup: volunteerActionsKeyboard(regId, reg.mission_id, 'CONFIRMED', false) }
