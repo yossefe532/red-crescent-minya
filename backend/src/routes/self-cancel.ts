@@ -121,6 +121,10 @@ selfCancelRoutes.post('/registrations/:regId/self-cancel', async (c) => {
       },
     });
 
+    // Phase 6: Increment mission version for live endpoint
+    const { incrementMissionVersion } = await import('../utils/version');
+    await incrementMissionVersion(c.env.DB, r.mission_id);
+
     // Queue Telegram notification
     try {
       const chatId = (c.env.ADMIN_CHAT_IDS || '').split(',')[0].trim();
