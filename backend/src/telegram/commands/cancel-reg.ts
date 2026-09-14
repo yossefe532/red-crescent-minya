@@ -8,6 +8,7 @@ import { statusLabel, regStatusLabel, formatDate, formatDateShort, formatMission
 import { mainMenuKeyboard, missionListKeyboard, missionDetailKeyboard, volunteerActionsKeyboard, skipButtonKeyboard, cancelWizardKeyboard, createConfirmKeyboard, confirmActionKeyboard, editFieldKeyboard, notificationSettingsKeyboard, backToMissionKeyboard, backToHomeKeyboard, missionPickerKeyboard } from '../keyboards';
 import { getMissionById, getMissionByPublicCode, listMissions } from '../../services/mission.service';
 import { logAudit } from '../../services/audit.service';
+import { incrementMissionVersion } from '../../utils/version';
 import { InlineKeyboard } from 'grammy';
 
 // ─── Helper Functions (should be moved to a service) ────────────
@@ -328,6 +329,9 @@ export async function executeCancelRegistration(
         } : null
       }
     });
+
+    // Phase 6: Increment mission version for live change detection
+    await incrementMissionVersion(db, reg.mission_id);
 
     // Clear session
     await clearSession(db, chatId);

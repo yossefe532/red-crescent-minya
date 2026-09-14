@@ -5,6 +5,7 @@ import { generateRegistrationId, generateUUID, generateAudioKey } from '../utils
 import { logAudit } from '../services/audit.service';
 import { createNotificationEvent, processPendingNotifications } from '../services/notification_outbox';
 import { getOwnershipToken } from '../middleware/ownership';
+import { incrementMissionVersion } from '../utils/version';
 import { InlineKeyboard } from 'grammy';
 
 // ─── Telegram Notification Helpers ──────────────────────
@@ -563,6 +564,9 @@ publicRegistrationRoutes.post('/register', async (c) => {
             console.error('[OUTBOX] Failed to queue capacity notification:', outboxErr);
           }
         }
+
+        // Phase 6: Increment mission version for live change detection
+        await incrementMissionVersion(c.env.DB, missionData.id);
 
         return success(c, {
               registration_id: registrationId,

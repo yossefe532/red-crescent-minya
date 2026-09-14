@@ -13,6 +13,7 @@ import {
 } from '../services/mission.service';
 import { logAudit } from '../services/audit.service';
 import { createMissionSchema, updateMissionSchema } from '../validation/admin.schema';
+import { incrementMissionVersion } from '../utils/version';
 
 const adminRoutes = new Hono<AppEnv>();
 
@@ -578,6 +579,9 @@ adminRoutes.post('/registrations/:regId/status', adminAuth, async (c) => {
         entityId: regId,
         metadata: { missionId: reg.mission_id, waitlistPosition: newWaitlistPos },
       });
+
+      // Phase 6: Increment mission version for live change detection
+      await incrementMissionVersion(c.env.DB, reg.mission_id);
 
       return success(c, {
         registration_id: regId,

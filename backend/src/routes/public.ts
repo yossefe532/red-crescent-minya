@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { Env } from '../env';
 import { success, Errors } from '../utils/response';
+import { getOwnershipToken } from '../middleware/ownership';
 
 const publicRoutes = new Hono<{ Bindings: Env }>();
 
@@ -227,3 +228,152 @@ publicRoutes.get('/volunteers/by-member-id/:memberId', async (c) => {
 });
 
 export { publicRoutes };
+
+// ─── Phase 6: Unified Live Endpoint ────────────────────────────
+// GET /api/missions/:publicCode/live?since_version=N
+//
+// Replaces 4 separate polling mechanisms with 1 smart endpoint.
+// Uses version-based change detection: if nothing changed, returns
+// a minimal { changed: false } response instead of the full payload.
+//
+// Request headers:
+//   X-Ownership-Token — optional, to include my_registrations
+//
+// Response when unchanged:
+//   { success: true, data: { changed: false, version: N } }
+//
+// Response when changed:
+//   { success: true, data: { changed: true, version: N, mission: {...}, registrations: [...], my_registrations: [...] } }
+
+publicRoutes.get('/missions/:publicCode/live', async (c) => {
+  try {
+    const publicCode = c.req.param('publicCode');
+    const sinceVersion = parseInt(c.req.query('since_version') || '-1', 10);
+
+    // 1. Get mission with version
+    const mission = await c.env.DB.prepare(`
+      SELECT id, public_code, title, description, location,
+             start_at, end_at, capacity, confirmation_phrase, status,
+             registration_open_at, registration_close_at, waiting_list, version
+      FROM missions
+      WHERE public_code = ?
+    `).bind(publicCode).first();
+
+    if (!mission) {
+      return Errors.notFound(c, 'Mission');
+    }
+
+    const m = mission as any;
+    const currentVersion = m.version || 0;
+
+    // 2. Fast path: no change since last poll
+    if (sinceVersion >= 0 && sinceVersion === currentVersion) {
+      return success(c, { changed: false, version: currentVersion });
+    }
+
+    // 3. Something changed — build full payload
+    // 3a. Registration counts
+    const counts = await c.env.DB.prepare(`
+      SELECT
+        COUNT(CASE WHEN status = 'CONFIRMED' THEN 1 END) as confirmed,
+        COUNT(CASE WHEN status = 'WAITLIST' THEN 1 END) as waitlist
+      FROM registrations
+      WHERE mission_id = ?
+    `).bind(m.id).first();
+
+    const cd = counts as any;
+    const confirmedCount = cd?.confirmed || 0;
+    const waitlistCount = cd?.waitlist || 0;
+
+    // 3b. Registration open check
+    const now = new Date().toISOString();
+    const registrationOpen = m.registration_open_at ? now >= m.registration_open_at : true;
+    const registrationClosed = m.registration_close_at ? now >= m.registration_close_at : false;
+    const isOpen = m.status === 'OPEN' && registrationOpen && !registrationClosed;
+
+    // 3c. Roster (official + temporary registrations, excluding cancelled)
+    const regsResult = await c.env.DB.prepare(`
+      SELECT r.id, v.name, v.member_id, r.status, r.seat_number,
+             r.waitlist_position, r.created_at, 'OFFICIAL' as source
+      FROM registrations r
+      JOIN volunteers v ON v.id = r.volunteer_id
+      WHERE r.mission_id = ? AND r.status != 'CANCELLED'
+      ORDER BY r.registration_sequence ASC
+      LIMIT 100
+    `).bind(m.id).all();
+
+    const tempResult = await c.env.DB.prepare(`
+      SELECT id, name, NULL as member_id, status, seat_number,
+             waitlist_position, created_at, 'TEMP' as source
+      FROM temporary_registrations
+      WHERE mission_id = ? AND status != 'CANCELLED'
+      ORDER BY registration_sequence ASC
+      LIMIT 50
+    `).bind(m.id).all();
+
+    const allRegs = [
+      ...(regsResult.results || []),
+      ...(tempResult.results || []),
+    ].sort((a: any, b: any) => {
+      return (a.created_at || '').localeCompare(b.created_at || '');
+    }).slice(0, 100);
+
+    const registrations = allRegs.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      member_id: row.member_id,
+      status: row.status,
+      seat_number: row.seat_number,
+      waitlist_position: row.waitlist_position,
+      created_at: row.created_at,
+    }));
+
+    // 3d. My registrations (if ownership token provided)
+    let myRegistrations: any[] = [];
+    const ownershipToken = getOwnershipToken(c);
+    if (ownershipToken) {
+      const myRegs = await c.env.DB.prepare(`
+        SELECT id, status, seat_number, waitlist_position, created_at, ownership_token
+        FROM registrations
+        WHERE mission_id = ? AND ownership_token = ?
+        ORDER BY created_at DESC
+      `).bind(m.id, ownershipToken).all();
+
+      myRegistrations = (myRegs.results || []).map((r: any) => ({
+        id: r.id,
+        status: r.status,
+        seat_number: r.seat_number,
+        waitlist_position: r.waitlist_position,
+        created_at: r.created_at,
+      }));
+    }
+
+    return success(c, {
+      changed: true,
+      version: currentVersion,
+      mission: {
+        id: m.id,
+        public_code: m.public_code,
+        title: m.title,
+        description: m.description,
+        location: m.location,
+        start_at: m.start_at,
+        end_at: m.end_at,
+        capacity: m.capacity,
+        confirmation_phrase: m.confirmation_phrase,
+        status: m.status,
+        confirmed: confirmedCount,
+        waitlist: waitlistCount,
+        available: Math.max(0, m.capacity - confirmedCount),
+        is_full: confirmedCount >= m.capacity,
+        is_completely_full: confirmedCount >= m.capacity && (waitlistCount >= (m.waiting_list || 0) || !m.waiting_list),
+        registration_open: isOpen,
+      },
+      registrations,
+      my_registrations: myRegistrations,
+    });
+  } catch (err: any) {
+    console.error('Live endpoint error:', err);
+    return Errors.internal(c);
+  }
+});

@@ -7,7 +7,9 @@
  *   - Telegram cancel (future)
  *
  * Ensures consistent behavior: atomically cancel → promote → reorder waitlist.
+ * Increments mission version for live change detection (Phase 6).
  */
+import { incrementMissionVersion } from '../utils/version';
 
 export interface CancelResult {
   registration_id: string;
@@ -173,6 +175,9 @@ export async function cancelRegistration(
       .bind(missionId, r.waitlist_position)
       .run();
   }
+
+  // 5. Increment mission version for live change detection (Phase 6)
+  await incrementMissionVersion(db, missionId);
 
   return {
     registration_id: regId,

@@ -150,3 +150,49 @@ export async function selfCancelRegistration(regId: string): Promise<{
   }
   return data.data;
 }
+
+// ── Phase 6: Unified Live Endpoint ──
+export interface LiveRosterEntry {
+  id: string;
+  name: string;
+  member_id: string | null;
+  status: string;
+  seat_number: number | null;
+  waitlist_position: number | null;
+  created_at: string;
+}
+
+export interface LiveMyRegistration {
+  id: string;
+  status: string;
+  seat_number: number | null;
+  waitlist_position: number | null;
+  created_at: string;
+}
+
+export interface LiveMissionResponse {
+  changed: boolean;
+  version: number;
+  mission?: Mission;
+  registrations?: LiveRosterEntry[];
+  my_registrations?: LiveMyRegistration[];
+}
+
+/**
+ * Unified live polling endpoint — replaces 4 separate polling mechanisms.
+ * Sends current version to detect changes; returns minimal response if unchanged.
+ * Ownership token is sent automatically via cookie (ownershipMiddleware).
+ */
+export async function getLiveMission(
+  publicCode: string,
+  sinceVersion: number = -1,
+): Promise<LiveMissionResponse> {
+  const res = await fetch(
+    `${API_BASE}/missions/${publicCode}/live?since_version=${sinceVersion}`,
+  );
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'فشل تحميل بيانات المهمة');
+  }
+  return data.data;
+}

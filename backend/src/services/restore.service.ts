@@ -6,8 +6,11 @@
  * 1. If was CONFIRMED → restore directly if seat available
  * 2. If no seat → revoke most recent promotion, restore original
  * 3. If was WAITLIST → restore with next available waitlist position
+ *
+ * Increments mission version for live change detection (Phase 6).
  */
 import { logAudit } from './audit.service';
+import { incrementMissionVersion } from '../utils/version';
 
 export interface RestoreResult {
   registration_id: string;
@@ -289,6 +292,9 @@ export async function restoreRegistration(
       revoked_promotion: revokedPromotion?.registration_id || null,
     },
   });
+
+  // Increment mission version for live change detection (Phase 6)
+  await incrementMissionVersion(db, missionId);
 
   return {
     registration_id: regId,

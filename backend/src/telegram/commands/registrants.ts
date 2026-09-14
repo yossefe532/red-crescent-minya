@@ -13,6 +13,7 @@ import {
 } from '../keyboards';
 import { getMissionById, getMissionAvailability } from '../../services/mission.service';
 import { logAudit } from '../../services/audit.service';
+import { incrementMissionVersion } from '../../utils/version';
 
 // ─── Show Registrants ──────────────────────────────────────────
 export async function handleRegistrants(
@@ -360,6 +361,9 @@ export async function handleVolunteerMove(
       entityId: regId,
       metadata: { missionId: reg.mission_id, waitlistPosition: newWaitlistPos }
     });
+
+    // Phase 6: Increment mission version for live change detection
+    await incrementMissionVersion(db, reg.mission_id);
 
     await tgSend(token, chatId,
       `⏳ تحويل <b>${escapeHtml(reg.name)}</b> للانتظار في مهمة <b>${escapeHtml(reg.title)}</b> (${reg.public_code})\n⏳ رقم الانتظار: ${newWaitlistPos}`,

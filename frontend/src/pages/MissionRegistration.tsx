@@ -20,6 +20,8 @@ import {
   Phone,
   Hash,
   Trash2,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import {
   getMission,
@@ -27,12 +29,13 @@ import {
   saveQuickProfile,
   submitRegistration,
   submitTemporaryRegistration,
-  getMyRegistrations,
   selfCancelRegistration,
   Mission,
   RegistrationResult,
-  MyRegistration,
+  LiveRosterEntry,
+  LiveMyRegistration,
 } from '../api/public';
+import { useLiveMission, ConnectionState } from '../hooks/useLiveMission';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Badge from '@/components/ui/Badge';
@@ -43,26 +46,27 @@ import ErrorState from '@/components/ui/ErrorState';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 
-interface LiveVolunteer {
-  id: string;
-  name: string;
-  member_id: string;
-  status: string;
-  seat_number: number | null;
-  waitlist_position: number | null;
-  created_at: string;
-}
-
 export function MissionRegistration() {
   const { code } = useParams<{ code: string }>();
   const { success: toastSuccess, error: toastError } = useToast();
 
-  const [mission, setMission] = useState<Mission | null>(null);
+  // ── Phase 6: Unified live hook replaces 4 separate polling mechanisms ──
+  const {
+    mission: liveMission,
+    registrations: liveRegistrations,
+    myRegistrations: liveMyRegistrations,
+    version: liveVersion,
+    connectionState,
+    refresh: refreshLive,
+  } = useLiveMission(code || '');
+
+  // Local mission state for initial load + error handling
   const [loadingMission, setLoadingMission] = useState(true);
   const [missionError, setMissionError] = useState<string | null>(null);
+  const [initialMission, setInitialMission] = useState<Mission | null>(null);
 
-  const [liveRegistrations, setLiveRegistrations] = useState<LiveVolunteer[]>([]);
-  const [mode, setMode] = useState<'normal' | 'temp' | 'quick-save'>('normal');
+  // Use live mission data when available, fall back to initial
+  const mission = liveMission || initialMission;
 
   const [memberId, setMemberId] = useState('');
   const [name, setName] = useState('');
@@ -86,104 +90,36 @@ export function MissionRegistration() {
   const [successMode, setSuccessMode] = useState<'result' | 'quick-save' | 'quick-save-success'>('result');
   const [completed, setCompleted] = useState(false);
 
-  // Self-cancel state
-  const [myRegistrations, setMyRegistrations] = useState<MyRegistration[]>([]);
+  // ── Self-cancel state ──
   const [cancellingMyRegId, setCancellingMyRegId] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
-  // 1. Fetch Mission Info
-  const fetchMissionData = async (isInitial = false) => {
+  const [mode, setMode] = useState<'normal' | 'temp' | 'quick-save'>('normal');
+
+  // 1. Initial mission fetch (for loading/error states)
+  useEffect(() => {
     if (!code) return;
-    try {
-      const data = await getMission(code);
-      setMission(data);
-      if (isInitial) setLoadingMission(false);
-    } catch (err: any) {
-      if (isInitial) {
+    const fetchInitial = async () => {
+      try {
+        const data = await getMission(code);
+        setInitialMission(data);
+        setLoadingMission(false);
+      } catch (err: any) {
         setMissionError(err.message || 'المهمة غير موجودة أو تم إلغاؤها');
         setLoadingMission(false);
       }
-    }
-  };
-
-  useEffect(() => {
-    fetchMissionData(true);
-    const interval = setInterval(() => fetchMissionData(false), 3000);
-    return () => clearInterval(interval);
-  }, [code]);
-
-  // 1b. Status polling
-  const lastStatusRef = useRef<string>('');
-  useEffect(() => {
-    if (!code) return;
-    const pollStatus = async () => {
-      try {
-        const res = await fetch(`/api/missions/${code}/status`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data.success) return;
-        const s = data.data;
-        const fingerprint = `${s.status}|${s.is_completely_full}|${s.confirmed}|${s.waitlist}|${s.registration_open}`;
-        if (fingerprint !== lastStatusRef.current) {
-          lastStatusRef.current = fingerprint;
-          setMission((prev: any) => prev ? {
-            ...prev,
-            status: s.status,
-            confirmed: s.confirmed,
-            waitlist: s.waitlist,
-            is_full: s.is_full,
-            is_completely_full: s.is_completely_full,
-            registration_open: s.registration_open,
-          } : prev);
-        }
-      } catch {}
     };
-    pollStatus();
-    const interval = setInterval(pollStatus, 1000);
-    return () => clearInterval(interval);
+    fetchInitial();
   }, [code]);
 
-  // 2. Live registrations polling
-  const fetchLiveRegistrations = async () => {
-    if (!code) return;
-    try {
-      const res = await fetch(`/api/missions/${code}/registrations-live`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) setLiveRegistrations(data.data || []);
-      }
-    } catch {}
-  };
-
-  useEffect(() => {
-    fetchLiveRegistrations();
-    const interval = setInterval(fetchLiveRegistrations, 3000);
-    return () => clearInterval(interval);
-  }, [code]);
-
-  // 2b. My Registrations polling (ownership-based self-cancel)
-  const fetchMyRegistrations = async () => {
-    if (!code) return;
-    try {
-      const regs = await getMyRegistrations(code);
-      setMyRegistrations(regs);
-    } catch {}
-  };
-
-  useEffect(() => {
-    fetchMyRegistrations();
-    const interval = setInterval(fetchMyRegistrations, 3000);
-    return () => clearInterval(interval);
-  }, [code]);
-
-  // Self-cancel handler
+  // Self-cancel handler (uses hook's refresh to update live data)
   const doSelfCancel = async (regId: string) => {
     setCancellingMyRegId(regId);
     try {
       const result = await selfCancelRegistration(regId);
       toastSuccess(result.message || 'تم إلغاء التسجيل بنجاح');
       setConfirmCancelId(null);
-      fetchMyRegistrations();
+      refreshLive(); // Force immediate refresh after cancellation
     } catch (err: any) {
       toastError(err.message || 'فشل إلغاء التسجيل');
     } finally {
@@ -280,6 +216,7 @@ export function MissionRegistration() {
         const res = await submitTemporaryRegistration({ mission_public_code: mission?.public_code || '', name: name.trim(), phone: phone.trim() });
         setResult(res);
         setSuccessMode('result');
+        refreshLive(); // Force immediate refresh after registration
       } catch (err: any) { setSubmitError(err.message || 'حدث خطأ أثناء التسجيل المؤقت'); } finally { setIsSubmitting(false); }
       return;
     }
@@ -298,6 +235,7 @@ export function MissionRegistration() {
       const res = await submitRegistration(formData);
       setResult(res);
       setSuccessMode('result');
+      refreshLive(); // Force immediate refresh after registration
     } catch (err: any) { setSubmitError(err.message || 'حدث خطأ أثناء إتمام التسجيل.'); } finally { setIsSubmitting(false); }
   };
 
@@ -359,7 +297,66 @@ export function MissionRegistration() {
                 : 'تم إغلاق باب التسجيل لهذه المهمة.'}
           </p>
 
-          <div className="pt-4 border-t border-slate-100">
+          {/* Roster remains visible even when full — Phase 6 spec #7 */}
+          {liveRegistrations.length > 0 && (
+            <div className="mt-4 text-right">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5 justify-center">
+                <Circle className="h-1.5 w-1.5 fill-success-500 text-success-500 animate-pulse" />
+                المسجلون ({liveRegistrations.length})
+              </h4>
+              <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50">
+                {liveRegistrations.map((reg, idx) => (
+                  <div key={reg.id} className={cn('roster-row flex items-center gap-2 px-3 py-2 border-b border-slate-100 last:border-b-0 text-right')}>
+                    <span className="text-[10px] font-mono font-bold text-slate-400 w-5 text-center shrink-0">{idx + 1}</span>
+                    <span className="text-xs font-bold text-slate-800 flex-1 truncate">{reg.name}</span>
+                    <StatusBadge status={reg.status} className="!text-[9px] !px-1 !py-0 shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* My registrations remain visible for self-cancel */}
+          {liveMyRegistrations.length > 0 && (
+            <div className="mt-4 text-right">
+              <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5 justify-center">
+                <UserRound className="h-3 w-3 text-brand-600" />
+                تسجيلاتك
+              </h4>
+              {liveMyRegistrations.filter(r => r.status !== 'CANCELLED').map((reg) => (
+                <div key={reg.id} className="flex items-center justify-between gap-2 bg-white rounded-xl border border-slate-200 p-3 mb-2">
+                  <div className="flex-1 text-right">
+                    <StatusBadge status={reg.status} className="!text-[10px] !px-1.5 !py-0.5" />
+                    {reg.status === 'CONFIRMED' && reg.seat_number && (
+                      <span className="text-[10px] text-success-600 font-mono mr-2">#{reg.seat_number}</span>
+                    )}
+                    {reg.status === 'WAITLIST' && reg.waitlist_position && (
+                      <span className="text-[10px] text-warning-600 font-mono mr-2">#{reg.waitlist_position}</span>
+                    )}
+                  </div>
+                  {(reg.status === 'CONFIRMED' || reg.status === 'WAITLIST') && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmCancelId(reg.id)}
+                      className="text-danger-600 hover:text-danger-700 hover:bg-danger-50 shrink-0"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span className="text-[10px]">إلغاء</span>
+                    </Button>
+                  )}
+                  {confirmCancelId === reg.id && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="danger" size="sm" loading={cancellingMyRegId === reg.id} onClick={() => doSelfCancel(reg.id)}>تأكيد</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmCancelId(null)}>لا</Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="pt-4 border-t border-slate-100 mt-4">
             <button
               onClick={() => setMode('quick-save')}
               className="text-sm text-brand-600 hover:text-brand-700 font-bold underline"
@@ -586,18 +583,33 @@ export function MissionRegistration() {
           </div>
         </Card>
 
-        {/* LIVE REGISTRATIONS TABLE */}
+        {/* LIVE REGISTRATIONS TABLE — Phase 6 Roster */}
         {liveRegistrations.length > 0 && (
           <Card padding={false}>
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <Circle className="h-2 w-2 fill-success-500 text-success-500 animate-pulse" />
-                التسجيلات الحية
+                المسجلون
                 <span className="text-xs font-normal text-slate-400">({liveRegistrations.length})</span>
               </h3>
-              <span className="text-[10px] text-slate-400 font-medium">تحديث تلقائي كل 3 ثواني</span>
+              <div className="flex items-center gap-2">
+                {/* Connection state indicator */}
+                {connectionState === 'reconnecting' && (
+                  <span className="text-[10px] text-warning-600 font-medium flex items-center gap-1 animate-pulse">
+                    <WifiOff className="h-3 w-3" />
+                    جاري إعادة الاتصال...
+                  </span>
+                )}
+                {connectionState === 'connected' && (
+                  <span className="text-[10px] text-success-600 font-medium flex items-center gap-1">
+                    <Wifi className="h-3 w-3" />
+                    مباشر
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="overflow-x-auto max-h-64 overflow-y-auto">
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto max-h-64 overflow-y-auto">
               <table className="w-full text-right text-[11px]">
                 <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-100 sticky top-0">
                   <tr>
@@ -611,7 +623,7 @@ export function MissionRegistration() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {liveRegistrations.map((reg, idx) => (
-                    <tr key={reg.id} className={idx === 0 ? 'bg-success-50/50' : ''}>
+                    <tr key={reg.id} className={cn('roster-row', idx === 0 && 'bg-success-50/50')}>
                       <td className="py-1.5 px-2 font-mono font-bold text-slate-400">{idx + 1}</td>
                       <td className="py-1.5 px-2 font-bold text-slate-900">{reg.name}</td>
                       <td className="py-1.5 px-2 font-mono text-slate-700">{reg.member_id}</td>
@@ -627,19 +639,38 @@ export function MissionRegistration() {
                 </tbody>
               </table>
             </div>
+            {/* Mobile compact list */}
+            <div className="sm:hidden max-h-64 overflow-y-auto">
+              {liveRegistrations.map((reg, idx) => (
+                <div key={reg.id} className={cn('roster-row flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-b-0', idx === 0 && 'bg-success-50/30')}>
+                  <span className="text-xs font-mono font-bold text-slate-400 w-6 text-center shrink-0">
+                    {String(idx + 1).padStart(2, '0')}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-900 truncate">{reg.name}</p>
+                    <p className="text-[10px] text-slate-500">
+                      {reg.member_id && <span className="font-mono">{reg.member_id}</span>}
+                      {reg.status === 'CONFIRMED' && reg.seat_number && <span className="font-mono text-success-600"> • #{reg.seat_number}</span>}
+                      {reg.status === 'WAITLIST' && reg.waitlist_position && <span className="font-mono text-warning-600"> • #{reg.waitlist_position}</span>}
+                    </p>
+                  </div>
+                  <StatusBadge status={reg.status} className="!text-[9px] !px-1 !py-0 shrink-0" />
+                </div>
+              ))}
+            </div>
           </Card>
         )}
 
         {/* ========== MY REGISTRATIONS (Self-Cancel) ========== */}
-        {myRegistrations.length > 0 && (
+        {liveMyRegistrations.length > 0 && (
           <Card>
             <div className="flex items-center gap-2 mb-4">
               <UserRound className="h-4 w-4 text-brand-600" />
               <h3 className="text-base font-bold text-slate-900">تسجيلاتك</h3>
-              <span className="text-xs text-slate-400 font-medium">({myRegistrations.length})</span>
+              <span className="text-xs text-slate-400 font-medium">({liveMyRegistrations.length})</span>
             </div>
             <div className="space-y-3">
-              {myRegistrations.map((reg) => {
+              {liveMyRegistrations.map((reg) => {
                 const isActive = reg.status === 'CONFIRMED' || reg.status === 'WAITLIST';
                 const isCancelled = reg.status === 'CANCELLED';
                 const isCancelling = cancellingMyRegId === reg.id;
@@ -655,11 +686,9 @@ export function MissionRegistration() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-bold text-slate-900">{reg.name}</span>
                           <StatusBadge status={reg.status} className="!text-[10px] !px-1.5 !py-0.5" />
                         </div>
                         <div className="text-xs text-slate-500 space-y-0.5">
-                          {reg.member_id && <p>رقم العضوية: <span className="font-mono font-bold">{reg.member_id}</span></p>}
                           {reg.status === 'CONFIRMED' && reg.seat_number && <p>رقم المقعد: <span className="font-mono font-bold text-success-600">#{reg.seat_number}</span></p>}
                           {reg.status === 'WAITLIST' && reg.waitlist_position && <p>موقع في الانتظار: <span className="font-mono font-bold text-warning-600">#{reg.waitlist_position}</span></p>}
                           <p>تاريخ التسجيل: <span className="font-mono">{new Date(reg.created_at).toLocaleString('ar-EG')}</span></p>

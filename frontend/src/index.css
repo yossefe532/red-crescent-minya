@@ -28,6 +28,24 @@
   }
 }
 
+/* ── Phase 6: Roster entry animation ── */
+/* Subtle slide-in for new roster rows. Only applies to newly added entries.
+   Respects prefers-reduced-motion via the base layer above. */
+@keyframes roster-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.roster-row {
+  animation: roster-slide-in 0.3s ease-out;
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold text-base transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
