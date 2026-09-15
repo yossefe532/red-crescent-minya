@@ -26,6 +26,7 @@ import StatusBadge from '@/components/ui/StatusBadge';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
+import { formatEgyptDateTime } from '@/lib/timezone';
 
 interface Props {
   mission: Mission;
@@ -282,11 +283,11 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
                 <div className="space-y-1.5 text-xs text-slate-700">
                   <div className="flex justify-between">
                     <span className="font-medium">بداية المهمة:</span>
-                    <span className="font-bold">{new Date(localMission.start_at).toLocaleString('ar-EG')}</span>
+                    <span className="font-bold">{formatEgyptDateTime(localMission.start_at)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium">نهاية المهمة:</span>
-                    <span className="font-bold">{new Date(localMission.end_at).toLocaleString('ar-EG')}</span>
+                    <span className="font-bold">{formatEgyptDateTime(localMission.end_at)}</span>
                   </div>
                 </div>
               </div>
@@ -466,7 +467,7 @@ export function MissionControlPanel({ mission, onClose, onUpdate }: Props) {
                 <div className="space-y-1.5 text-xs text-slate-600">
                   <div className="flex justify-between">
                     <span>تاريخ الإنشاء:</span>
-                    <span className="font-mono font-bold">{new Date(localMission.created_at).toLocaleString('ar-EG')}</span>
+                    <span className="font-mono font-bold">{formatEgyptDateTime(localMission.created_at)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>معرّف المهمة:</span>

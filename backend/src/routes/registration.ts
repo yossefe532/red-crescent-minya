@@ -7,6 +7,8 @@ import { createNotificationEvent, processPendingNotifications } from '../service
 import { getOwnershipToken } from '../middleware/ownership';
 import { incrementMissionVersion } from '../utils/version';
 import { InlineKeyboard } from 'grammy';
+import { getMissionRequirements, getMissionQuestions, saveRegistrationAnswers } from '../services/mission.requirements.service';
+import { SQL_NOW_ISO } from '../config/timezone';
 
 // ─── Telegram Notification Helpers ──────────────────────
 async function sendTelegramVoice(
@@ -100,6 +102,7 @@ publicRegistrationRoutes.post('/register', async (c) => {
     let audioBuffer: Uint8Array | null = null;
     let mimeType = 'audio/webm';
     let durationMs = 0;
+    let parsedBody: any = null; // Cached JSON body for requirement/answer extraction
 
     const contentType = c.req.header('content-type') || '';
 
@@ -131,6 +134,7 @@ publicRegistrationRoutes.post('/register', async (c) => {
       request_id = (body.request_id || '').trim();
       durationMs = body.duration_ms || 0;
       mimeType = body.mime_type || 'audio/webm';
+      parsedBody = body; // Cache for later use (requirement/answers)
 
       if (body.audio_blob) {
         const cleanBase64 = body.audio_blob.replace(/^data:audio\/[a-z0-9]+;base64,/, '');
@@ -213,6 +217,112 @@ publicRegistrationRoutes.post('/register', async (c) => {
     }
     if (missionData.registration_close_at && nowIso >= missionData.registration_close_at) {
       return Errors.conflict(c, 'تم إغلاق باب التسجيل لهذه المهمة.');
+    }
+
+    // 4. Requirement & Question Validation
+    let requirementAccepted = false;
+    let answers: Array<{ question_id: string; answer_text: string }> = [];
+
+    // Parse requirement acceptance and answers from request
+    if (contentType.includes('multipart/form-data')) {
+      // Already parsed above — get from form data
+      const formData = await c.req.formData();
+      requirementAccepted = formData.get('requirement_accepted') === 'true';
+      const answersStr = formData.get('answers') as string;
+      if (answersStr) {
+        try { answers = JSON.parse(answersStr); } catch {}
+      }
+    } else {
+      // JSON body — use cached parse from above
+      requirementAccepted = parsedBody.requirement_accepted === true;
+      if (Array.isArray(parsedBody.answers)) {
+        answers = parsedBody.answers;
+      }
+    }
+
+    // 4a. Validate requirements
+    const requirements = await getMissionRequirements(c.env.DB, missionData.id);
+    const hasRequiredRequirement = requirements.some(r => r.requires_acceptance === 1);
+    if (hasRequiredRequirement && !requirementAccepted) {
+      return Errors.validation(c, [{
+        path: 'requirement_accepted',
+        message: 'يجب الموافقة على شروط المهمة لإتمام التسجيل',
+        code: 'REQUIREMENT_NOT_ACCEPTED',
+      }]);
+    }
+
+    // 4b. Validate questions
+    const questions = await getMissionQuestions(c.env.DB, missionData.id);
+    const questionMap = new Map(questions.map(q => [q.id, q]));
+    const validationErrors: Array<{ path: string; message: string; code?: string }> = [];
+
+    for (const q of questions) {
+      const answer = answers.find(a => a.question_id === q.id);
+
+      if (q.required === 1) {
+        if (!answer || !answer.answer_text || answer.answer_text.trim() === '') {
+          validationErrors.push({
+            path: `answers.${q.id}`,
+            message: `السؤال "${q.question_text}" إجابة مطلوبة`,
+            code: 'QUESTION_REQUIRED',
+          });
+          continue;
+        }
+      }
+
+      if (answer && answer.answer_text) {
+        const text = answer.answer_text.trim();
+
+        // Validate question type
+        if (q.question_type === 'SINGLE_CHOICE' || q.question_type === 'YES_NO') {
+          const options: string[] = JSON.parse(q.options || '[]');
+          if (q.question_type === 'YES_NO') {
+            if (text !== 'نعم' && text !== 'لا') {
+              validationErrors.push({
+                path: `answers.${q.id}`,
+                message: `إجابة السؤال "${q.question_text}" يجب أن تكون "نعم" أو "لا"`,
+                code: 'INVALID_ANSWER',
+              });
+            }
+          } else if (options.length > 0 && !options.includes(text)) {
+            validationErrors.push({
+              path: `answers.${q.id}`,
+              message: `إجابة السؤال "${q.question_text}" غير صحيحة`,
+              code: 'INVALID_OPTION',
+            });
+          }
+        } else if (q.question_type === 'MULTIPLE_CHOICE') {
+          const selectedOptions = text.split(',').map(s => s.trim());
+          const validOptions: string[] = JSON.parse(q.options || '[]');
+          if (validOptions.length > 0) {
+            for (const opt of selectedOptions) {
+              if (!validOptions.includes(opt)) {
+                validationErrors.push({
+                  path: `answers.${q.id}`,
+                  message: `الخيار "${opt}" غير صحيح في السؤال "${q.question_text}"`,
+                  code: 'INVALID_OPTION',
+                });
+              }
+            }
+          }
+        }
+        // TEXT type: any text is valid
+      }
+    }
+
+    // Reject unknown question IDs
+    for (const answer of answers) {
+      if (!questionMap.has(answer.question_id)) {
+        validationErrors.push({
+          path: `answers.${answer.question_id}`,
+          message: 'معرف السؤال غير صحيح',
+          code: 'UNKNOWN_QUESTION',
+        });
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      return Errors.validation(c, validationErrors);
     }
 
     // 4. Idempotency Check (by request_id)
@@ -334,11 +444,11 @@ publicRegistrationRoutes.post('/register', async (c) => {
       ? `${ownershipToken}:${missionData.id}:${volunteerId}` : null;
 
     await c.env.DB.prepare(
-      `INSERT INTO registrations (
-        id, mission_id, volunteer_id, status, seat_number, waitlist_position,
-        registration_sequence, request_id, ownership_token, idempotency_key, created_at
-      ) VALUES (?, ?, ?, 'PENDING', NULL, NULL, ?, ?, ?, ?, datetime('now'))`
-    ).bind(registrationId, missionData.id, volunteerId, nextSeq, request_id || null, ownershipToken, idempotencyKey).run();
+          `INSERT INTO registrations (
+            id, mission_id, volunteer_id, status, seat_number, waitlist_position,
+            registration_sequence, request_id, ownership_token, idempotency_key, created_at
+          ) VALUES (?, ?, ?, 'PENDING', NULL, NULL, ?, ?, ?, ?, ${SQL_NOW_ISO})`
+        ).bind(registrationId, missionData.id, volunteerId, nextSeq, request_id || null, ownershipToken, idempotencyKey).run();
 
     // 8. Atomic seat allocation using conditional UPDATE.
     // Row now exists as PENDING — UPDATE can find it.
@@ -463,7 +573,7 @@ publicRegistrationRoutes.post('/register', async (c) => {
     await c.env.DB.prepare(
       `INSERT INTO audio_confirmations (
         id, registration_id, phrase, audio_key, duration_ms, mime_type, audio_data, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ${SQL_NOW_ISO})`
     ).bind(audioId, registrationId, usedPhrase, audioKey, estDurationMs, mimeType, audioB64).run();
 
     // 11. Audit log
@@ -484,6 +594,16 @@ publicRegistrationRoutes.post('/register', async (c) => {
         duration_ms: Date.now() - startTime,
       }
     });
+
+    // 11b. Save question answers (persists across status changes)
+    if (answers.length > 0 && newStatus !== 'REJECTED') {
+      try {
+        await saveRegistrationAnswers(c.env.DB, registrationId, answers);
+      } catch (answerErr) {
+        console.error('[REGISTRATION] Failed to save question answers:', answerErr);
+        // Non-fatal: answers are optional for audit purposes
+      }
+    }
 
     // ─── 12. Outbox: queue Telegram notifications (durable, retryable) ───
         // Registration success MUST NOT fail because Telegram is slow/unavailable.

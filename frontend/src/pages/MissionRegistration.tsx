@@ -20,6 +20,7 @@ import {
   Phone,
   Hash,
   Trash2,
+  Undo2,
   Wifi,
   WifiOff,
   Activity,
@@ -32,6 +33,7 @@ import {
   submitRegistration,
   submitTemporaryRegistration,
   selfCancelRegistration,
+  selfRestoreRegistration,
   Mission,
   RegistrationResult,
   LiveRosterEntry,
@@ -48,6 +50,7 @@ import LoadingState from '@/components/ui/LoadingState';
 import ErrorState from '@/components/ui/ErrorState';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
+import { formatEgyptTime, formatEgyptDateTime, formatEgyptTimePrecise, isRecent } from '@/lib/timezone';
 
 export function MissionRegistration() {
   const { code } = useParams<{ code: string }>();
@@ -144,7 +147,14 @@ export function MissionRegistration() {
   const [cancellingMyRegId, setCancellingMyRegId] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
+  // ── Self-restore state ──
+  const [restoringMyRegId, setRestoringMyRegId] = useState<string | null>(null);
+
   const [mode, setMode] = useState<'normal' | 'temp' | 'quick-save'>('normal');
+
+  // ── Requirements & Questions state ──
+  const [requirementAccepted, setRequirementAccepted] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   // 1. Initial mission fetch (for loading/error states)
   useEffect(() => {
@@ -174,6 +184,20 @@ export function MissionRegistration() {
       toastError(err.message || 'فشل إلغاء التسجيل');
     } finally {
       setCancellingMyRegId(null);
+    }
+  };
+
+  // Self-restore handler (undo cancellation)
+  const doSelfRestore = async (regId: string) => {
+    setRestoringMyRegId(regId);
+    try {
+      const result = await selfRestoreRegistration(regId);
+      toastSuccess(result.message || 'تم استعادة التسجيل بنجاح');
+      refreshLive(); // Force immediate refresh after restore
+    } catch (err: any) {
+      toastError(err.message || 'فشل استعادة التسجيل');
+    } finally {
+      setRestoringMyRegId(null);
     }
   };
 
@@ -260,6 +284,26 @@ export function MissionRegistration() {
     if (!name.trim()) { setSubmitError('برجاء إدخال الاسم'); return; }
     if (!phone.trim() || !/^01[0125][0-9]{8}$/.test(phone.trim())) { setSubmitError('برجاء إدخال رقم تليفون صحيح (11 رقم يبدأ بـ 01)'); return; }
 
+    // ── Step 7: Validate requirements acceptance ──
+    const reqs = mission?.requirements || [];
+    const hasRequiredReq = reqs.some((r) => r.requires_acceptance === 1);
+    if (hasRequiredReq && !requirementAccepted) {
+      setSubmitError('يجب الموافقة على شروط المهمة لإتمام التسجيل');
+      return;
+    }
+
+    // ── Step 8: Validate required questions ──
+    const questions = mission?.questions || [];
+    for (const q of questions) {
+      if (q.required === 1) {
+        const val = answers[q.id] || '';
+        if (!val.trim()) {
+          setSubmitError(`السؤال "${q.question_text}" إجابة مطلوبة`);
+          return;
+        }
+      }
+    }
+
     if (mode === 'temp') {
       setIsSubmitting(true);
       try {
@@ -282,6 +326,14 @@ export function MissionRegistration() {
       formData.append('phrase', mission?.confirmation_phrase || '');
       formData.append('duration_ms', Math.round(recordingTime * 1000).toString());
       formData.append('audio', audioBlob, `recording_${memberId.trim()}.webm`);
+      // ── Step 7-8: Submit requirements acceptance + answers ──
+      formData.append('requirement_accepted', requirementAccepted ? 'true' : 'false');
+      const answersPayload = Object.entries(answers)
+        .filter(([_, v]) => v && v.trim())
+        .map(([question_id, answer_text]) => ({ question_id, answer_text }));
+      if (answersPayload.length > 0) {
+        formData.append('answers', JSON.stringify(answersPayload));
+      }
       const res = await submitRegistration(formData);
       setResult(res);
       setSuccessMode('result');
@@ -301,8 +353,9 @@ export function MissionRegistration() {
   };
 
   const formatDateTime = (isoStr?: string) => {
-    if (!isoStr) return '';
-    return new Date(isoStr).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // Canonical UTC → Africa/Cairo display. Handles ISO and legacy SQL-UTC strings.
+    // Precise variant: always HH:mm:ss.SSS so the exact registration instant is visible.
+    return formatEgyptTimePrecise(isoStr);
   };
 
   // ===== LOADING =====
@@ -359,6 +412,10 @@ export function MissionRegistration() {
                   <div key={reg.id} className={cn('roster-row flex items-center gap-2 px-3 py-2 border-b border-slate-100 last:border-b-0 text-right')}>
                     <span className="text-[10px] font-mono font-bold text-slate-400 w-5 text-center shrink-0">{idx + 1}</span>
                     <span className="text-xs font-bold text-slate-800 flex-1 truncate">{reg.name}</span>
+                    {reg.member_id && (
+                      <span className="text-[10px] font-mono text-slate-500 shrink-0">#{reg.member_id}</span>
+                    )}
+                    <span className="text-[10px] font-mono tabular-nums text-slate-500 shrink-0 dir-ltr" dir="ltr">{formatEgyptTimePrecise(reg.created_at)}</span>
                     <StatusBadge status={reg.status} className="!text-[9px] !px-1 !py-0 shrink-0" />
                   </div>
                 ))}
@@ -496,15 +553,9 @@ export function MissionRegistration() {
               <Button fullWidth onClick={() => {
                 setResult(null); setSuccessMode('result'); setMemberId(''); setName(''); setPhone('');
                 setAudioBlob(null); setAudioUrl(null); setRecordingState('idle'); setMode('normal');
+                setRequirementAccepted(false); setAnswers({});
               }}>
                 تسجيل لمتطوع آخر
-              </Button>
-              <Button fullWidth variant="secondary" onClick={() => setSuccessMode('quick-save')}>
-                <Zap className="h-4 w-4" />
-                سجّل المرة الجاية بطريقة أسرع
-              </Button>
-              <Button fullWidth variant="ghost" onClick={() => setCompleted(true)}>
-                تم
               </Button>
             </div>
           </div>
@@ -658,6 +709,13 @@ export function MissionRegistration() {
                 )}
               </div>
             </div>
+            {/* Latest registration metadata — automatically updated from live data, no extra API call */}
+            {liveRegistrations.length > 0 && (
+              <p className="text-[11px] text-slate-400 mb-2 px-1 flex items-center gap-1.5">
+                <Clock3 className="h-3 w-3" />
+                آخر تسجيل: {liveRegistrations[0].name} — {formatDateTime(liveRegistrations[0].created_at)}
+              </p>
+            )}
             {/* ── Phase 7: Live Activity Strip ── */}
             {recentEvents.length > 0 && (
               <div className="px-4 py-2.5 border-b border-slate-100 bg-brand-50/30">
@@ -694,7 +752,7 @@ export function MissionRegistration() {
                     <th className="py-2 px-2 font-mono">العضوية</th>
                     <th className="py-2 px-2">الحالة</th>
                     <th className="py-2 px-2">المقعد</th>
-                    <th className="py-2 px-2">الوقت</th>
+                    <th className="py-2 px-2">وقت التسجيل</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -709,7 +767,9 @@ export function MissionRegistration() {
                       <td className="py-1.5 px-2 font-mono text-slate-700">
                         {reg.status === 'CONFIRMED' ? `#${reg.seat_number}` : `#${reg.waitlist_position}`}
                       </td>
-                      <td className="py-1.5 px-2 text-slate-500 font-mono">{formatDateTime(reg.created_at)}</td>
+                      <td className="py-1.5 px-2 font-mono text-slate-500">
+                        {newEntryIds.has(reg.id) ? <span className="live-now">الآن</span> : isRecent(reg.created_at) ? <span className="live-now">الآن</span> : formatDateTime(reg.created_at)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -728,6 +788,7 @@ export function MissionRegistration() {
                       {reg.member_id && <span className="font-mono">{reg.member_id}</span>}
                       {reg.status === 'CONFIRMED' && reg.seat_number && <span className="font-mono text-success-600"> • #{reg.seat_number}</span>}
                       {reg.status === 'WAITLIST' && reg.waitlist_position && <span className="font-mono text-warning-600"> • #{reg.waitlist_position}</span>}
+                      <span className="font-mono text-slate-400"> • {newEntryIds.has(reg.id) || isRecent(reg.created_at) ? <span className="live-now">الآن</span> : formatDateTime(reg.created_at)}</span>
                     </p>
                   </div>
                   <StatusBadge status={reg.status} className="!text-[9px] !px-1 !py-0 shrink-0" />
@@ -761,13 +822,30 @@ export function MissionRegistration() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
+                        {/* Volunteer identity — required when one browser owns multiple registrations */}
+                        {reg.name && (
+                          <p className="text-sm font-bold text-slate-900 mb-0.5 flex items-center gap-1.5">
+                            <UserRound className="h-3.5 w-3.5 text-brand-600" />
+                            {reg.name}
+                          </p>
+                        )}
+                        {reg.member_id != null && reg.member_id !== '' && (
+                          <p className="text-[11px] text-slate-500 mb-1 flex items-center gap-1.5 font-mono">
+                            <Hash className="h-3 w-3 text-slate-400" />
+                            العضوية: {reg.member_id}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                           <StatusBadge status={reg.status} className="!text-[10px] !px-1.5 !py-0.5" />
+                          {reg.status === 'CONFIRMED' && reg.seat_number && <span className="text-xs text-success-700 font-medium">مؤكد — مقعد <span className="font-mono font-bold">#{reg.seat_number}</span></span>}
+                          {reg.status === 'WAITLIST' && reg.waitlist_position && <span className="text-xs text-warning-700 font-medium">انتظار — رقم <span className="font-mono font-bold">#{reg.waitlist_position}</span></span>}
+                          {reg.status === 'PENDING' && <span className="text-xs text-slate-500 font-medium">قيد المعالجة</span>}
                         </div>
                         <div className="text-xs text-slate-500 space-y-0.5">
-                          {reg.status === 'CONFIRMED' && reg.seat_number && <p>رقم المقعد: <span className="font-mono font-bold text-success-600">#{reg.seat_number}</span></p>}
-                          {reg.status === 'WAITLIST' && reg.waitlist_position && <p>موقع في الانتظار: <span className="font-mono font-bold text-warning-600">#{reg.waitlist_position}</span></p>}
-                          <p>تاريخ التسجيل: <span className="font-mono">{new Date(reg.created_at).toLocaleString('ar-EG')}</span></p>
+                          <p className="flex items-center gap-1.5">
+                            <Clock3 className="h-3 w-3 text-slate-400" />
+                            سُجّل: <span className="font-mono text-slate-700">{formatDateTime(reg.created_at)}</span>
+                          </p>
                         </div>
                       </div>
                       {isActive && !showConfirm && (
@@ -802,12 +880,163 @@ export function MissionRegistration() {
                         </div>
                       )}
                       {isCancelled && (
-                        <span className="text-xs text-slate-400 font-medium">ملغى</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={restoringMyRegId === reg.id}
+                          onClick={() => doSelfRestore(reg.id)}
+                          className="text-success-600 hover:text-success-700 hover:bg-success-50 shrink-0"
+                        >
+                          <Undo2 className="h-3.5 w-3.5" />
+                          <span className="text-xs">التراجع عن الإلغاء</span>
+                        </Button>
                       )}
                     </div>
                   </div>
                 );
               })}
+            </div>
+          </Card>
+        )}
+
+        {/* ========== REQUIREMENTS & ACCEPTANCE ========== */}
+        {mission.requirements && mission.requirements.length > 0 && (
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle2 className="h-4 w-4 text-brand-600" />
+              <h3 className="text-base font-bold text-slate-900">متطلبات المهمة</h3>
+            </div>
+            <div className="space-y-3">
+              {mission.requirements.map((req) => (
+                <div key={req.id} className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                  <p className="text-sm text-slate-800 font-medium mb-2">{req.text}</p>
+                  <p className="text-[10px] text-slate-500 mb-2">
+                    النوع: {
+                      req.type === 'declaration' ? 'تصريح' :
+                      req.type === 'file' ? 'مستند' :
+                      req.type === 'medical_check' ? 'فحص طبي' : req.type
+                    }
+                  </p>
+                  {req.requires_acceptance === 1 && (
+                    <label className="flex items-start gap-2.5 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={requirementAccepted}
+                        onChange={(e) => setRequirementAccepted(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      />
+                      <span className="text-xs text-slate-700 font-medium group-hover:text-slate-900">
+                        أوافق على هذا الشرط
+                      </span>
+                    </label>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* ========== QUESTIONS ========== */}
+        {mission.questions && mission.questions.length > 0 && (
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <User className="h-4 w-4 text-brand-600" />
+              <h3 className="text-base font-bold text-slate-900">أسئلة المهمة</h3>
+            </div>
+            <div className="space-y-4">
+              {mission.questions
+                .sort((a, b) => a.sort_order - b.sort_order)
+                .map((q) => {
+                  const parsedOptions: string[] = (() => {
+                    try { return JSON.parse(q.options || '[]'); } catch { return []; }
+                  })();
+                  const isMulti = q.question_type === 'MULTIPLE_CHOICE';
+                  const currentVal = answers[q.id] || '';
+                  const multiSelected = isMulti
+                    ? currentVal ? currentVal.split(',').map(s => s.trim()).filter(Boolean) : []
+                    : [];
+
+                  return (
+                    <div key={q.id} className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                      <label className="block text-sm text-slate-800 font-medium mb-1">
+                        {q.question_text}
+                        {q.required === 1 && <span className="text-danger-500 mr-1">*</span>}
+                      </label>
+                      <p className="text-[10px] text-slate-400 mb-3">
+                        {q.required === 1 ? 'مطلوب' : 'اختياري'}
+                      </p>
+
+                      {/* SINGLE_CHOICE — radio */}
+                      {q.question_type === 'SINGLE_CHOICE' && parsedOptions.length > 0 && (
+                        <div className="space-y-2">
+                          {parsedOptions.map((opt) => (
+                            <label key={opt} className="flex items-center gap-2.5 cursor-pointer group">
+                              <input
+                                type="radio"
+                                name={`q-${q.id}`}
+                                checked={currentVal === opt}
+                                onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                                className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-500"
+                              />
+                              <span className="text-xs text-slate-700 group-hover:text-slate-900">{opt}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* YES_NO — radio */}
+                      {q.question_type === 'YES_NO' && (
+                        <div className="flex gap-4">
+                          {['نعم', 'لا'].map((opt) => (
+                            <label key={opt} className="flex items-center gap-2 cursor-pointer group">
+                              <input
+                                type="radio"
+                                name={`q-${q.id}`}
+                                checked={currentVal === opt}
+                                onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                                className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-500"
+                              />
+                              <span className="text-xs text-slate-700 group-hover:text-slate-900">{opt}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* MULTIPLE_CHOICE — checkboxes */}
+                      {q.question_type === 'MULTIPLE_CHOICE' && parsedOptions.length > 0 && (
+                        <div className="space-y-2">
+                          {parsedOptions.map((opt) => (
+                            <label key={opt} className="flex items-center gap-2.5 cursor-pointer group">
+                              <input
+                                type="checkbox"
+                                checked={multiSelected.includes(opt)}
+                                onChange={() => {
+                                  const updated = multiSelected.includes(opt)
+                                    ? multiSelected.filter((o) => o !== opt)
+                                    : [...multiSelected, opt];
+                                  setAnswers((prev) => ({ ...prev, [q.id]: updated.join(', ') }));
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                              />
+                              <span className="text-xs text-slate-700 group-hover:text-slate-900">{opt}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* TEXT — textarea */}
+                      {q.question_type === 'TEXT' && (
+                        <textarea
+                          value={currentVal}
+                          onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                          placeholder="اكتب إجابتك هنا..."
+                          rows={3}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 transition"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           </Card>
         )}

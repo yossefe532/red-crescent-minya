@@ -170,7 +170,15 @@ export async function handleVolunteerDetail(
   const hasAudio = !!reg.audio_id;
   const audioDurationSec = reg.duration_ms ? Math.round(reg.duration_ms / 1000) : 0;
 
-  await tgSend(token, chatId, formatVolunteerDetail(reg, hasAudio, audioDurationSec), {
+  // Step 18: Fetch answers for this registration
+  let answers: Array<{ question_id: string; answer_text: string }> = [];
+  try {
+    const { getRegistrationAnswers } = await import('../../services/mission.requirements.service');
+    const rawAnswers = await getRegistrationAnswers(db, regId);
+    answers = rawAnswers.map((a: any) => ({ question_id: a.question_id, answer_text: a.answer_text }));
+  } catch {}
+
+  await tgSend(token, chatId, formatVolunteerDetail(reg, hasAudio, audioDurationSec, answers.length > 0 ? answers : undefined), {
     reply_markup: volunteerActionsKeyboard(regId, reg.mission_id, reg.status, hasAudio)
   });
 }

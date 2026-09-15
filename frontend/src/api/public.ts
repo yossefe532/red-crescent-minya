@@ -1,6 +1,22 @@
 // API base URL
 const API_BASE = '/api';
 
+export interface MissionRequirement {
+  id: string;
+  type: string;
+  text: string;
+  requires_acceptance: number;
+}
+
+export interface MissionQuestion {
+  id: string;
+  question_text: string;
+  question_type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'YES_NO' | 'TEXT';
+  required: number;
+  options: string; // JSON array string
+  sort_order: number;
+}
+
 export interface Mission {
   id: string;
   public_code: string;
@@ -19,6 +35,8 @@ export interface Mission {
   is_completely_full: boolean;
   registration_open: boolean;
   waiting_list?: number;
+  requirements?: MissionRequirement[];
+  questions?: MissionQuestion[];
 }
 
 export interface RegistrationResult {
@@ -151,6 +169,26 @@ export async function selfCancelRegistration(regId: string): Promise<{
   return data.data;
 }
 
+// ── Self-Restore (undo cancellation) ──
+export interface SelfRestoreResult {
+  registration_id: string;
+  restored_status: 'CONFIRMED' | 'WAITLIST';
+  seat_number: number | null;
+  waitlist_position: number | null;
+  message: string;
+}
+
+export async function selfRestoreRegistration(regId: string): Promise<SelfRestoreResult> {
+  const res = await fetch(`${API_BASE}/registrations/${regId}/self-restore`, {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'فشل استعادة التسجيل');
+  }
+  return data.data;
+}
+
 // ── Phase 6: Unified Live Endpoint ──
 export interface LiveRosterEntry {
   id: string;
@@ -164,6 +202,8 @@ export interface LiveRosterEntry {
 
 export interface LiveMyRegistration {
   id: string;
+  name?: string;
+  member_id?: string | number | null;
   status: string;
   seat_number: number | null;
   waitlist_position: number | null;

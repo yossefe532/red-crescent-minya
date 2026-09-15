@@ -313,6 +313,47 @@ export function getExportCsvUrl(missionId: string): string {
   return `/api/admin/missions/${missionId}/export`;
 }
 
+// ── Step 12: Registration answers ──
+export interface RegistrationAnswer {
+  id: string;
+  registration_id: string;
+  question_id: string;
+  answer_text: string;
+  answered_at: string;
+}
+
+export async function getRegistrationAnswers(registrationId: string): Promise<RegistrationAnswer[]> {
+  const res = await fetch(`/api/admin/registrations/${registrationId}/answers`, {
+    headers: authHeaders(),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error?.message || 'فشل جلب إجابات المتطوع');
+  }
+  return data.data?.answers || [];
+}
+
+// ── Step 13: Cancel registration with reason ──
+export async function cancelRegistrationWithReason(
+  registrationId: string,
+  reason?: string
+): Promise<{
+  cancelled_registration_id: string;
+  promoted_volunteer?: { name: string; member_id: string; new_seat_number: number } | null;
+  message: string;
+}> {
+  const res = await fetch(`/api/admin/registrations/${registrationId}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ reason: reason || 'عدم استيفاء شرط المهمة' }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error?.message || 'فشل إلغاء التسجيل');
+  }
+  return data.data;
+}
+
 // Toggle registration open/close
 export async function toggleMissionRegistration(missionId: string, open: boolean): Promise<Mission> {
   const res = await fetch(`/api/admin/missions/${missionId}/toggle-registration`, {

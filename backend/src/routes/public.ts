@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { Env } from '../env';
 import { success, Errors } from '../utils/response';
 import { getOwnershipToken } from '../middleware/ownership';
+import { getMissionRequirements, getMissionQuestions } from '../services/mission.requirements.service';
 
 const publicRoutes = new Hono<{ Bindings: Env }>();
 
@@ -64,6 +65,10 @@ publicRoutes.get('/missions/:publicCode', async (c) => {
     
     const isOpen = mission.status === 'OPEN' && registrationOpen && !registrationClosed;
 
+    // Get requirements and questions for this mission
+    const requirements = await getMissionRequirements(c.env.DB, mission.id);
+    const questions = await getMissionQuestions(c.env.DB, mission.id);
+
     return success(c, {
       id: mission.id,
       public_code: mission.public_code,
@@ -81,6 +86,20 @@ publicRoutes.get('/missions/:publicCode', async (c) => {
       is_full: confirmedCount >= mission.capacity,
       is_completely_full: confirmedCount >= mission.capacity && (waitlistCount >= (mission.waiting_list || 0) || !mission.waiting_list),
       registration_open: isOpen,
+      requirements: requirements.map(r => ({
+        id: r.id,
+        type: r.type,
+        text: r.text,
+        requires_acceptance: r.requires_acceptance,
+      })),
+      questions: questions.map(q => ({
+        id: q.id,
+        question_text: q.question_text,
+        question_type: q.question_type,
+        required: q.required,
+        options: q.options,
+        sort_order: q.sort_order,
+      })),
     });
   } catch (err: any) {
     console.error('Get mission error:', err);
@@ -332,15 +351,21 @@ publicRoutes.get('/missions/:publicCode/live', async (c) => {
     let myRegistrations: any[] = [];
     const ownershipToken = getOwnershipToken(c);
     if (ownershipToken) {
+      // Join volunteers to expose the owned volunteer's name + membership number.
+      // Temp registrations never carry an ownership_token, so a plain JOIN is sufficient.
       const myRegs = await c.env.DB.prepare(`
-        SELECT id, status, seat_number, waitlist_position, created_at, ownership_token
-        FROM registrations
-        WHERE mission_id = ? AND ownership_token = ?
-        ORDER BY created_at DESC
+        SELECT r.id, v.name, v.member_id, r.status, r.seat_number,
+               r.waitlist_position, r.created_at, r.ownership_token
+        FROM registrations r
+        JOIN volunteers v ON v.id = r.volunteer_id
+        WHERE r.mission_id = ? AND r.ownership_token = ?
+        ORDER BY r.registration_sequence ASC
       `).bind(m.id, ownershipToken).all();
 
       myRegistrations = (myRegs.results || []).map((r: any) => ({
         id: r.id,
+        name: r.name,
+        member_id: r.member_id,
         status: r.status,
         seat_number: r.seat_number,
         waitlist_position: r.waitlist_position,

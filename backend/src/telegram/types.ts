@@ -26,7 +26,13 @@ export type WizardState =
   | 'cancelreg_confirm'
   // Search
   | 'search_input'
-  | 'search_results';
+  | 'search_results'
+  // Requirements management
+  | 'req_text'
+  // Questions management
+  | 'q_text'
+  | 'q_type'
+  | 'q_options';
 
 export interface WizardData {
   title?: string;

@@ -96,6 +96,31 @@ export async function handleWizardMessage(
       return true;
     }
 
+    // ─── Requirements & Questions Management ──────────────────
+    case 'req_text': {
+      const { handleRequirementText } = await import('./commands/requirements');
+      await handleRequirementText(token, chatId, db, text);
+      return true;
+    }
+    case 'q_type': {
+      // q_type is handled via callback buttons (questionTypeKeyboard).
+      await tgSend(token, chatId,
+        '⚠️ استخدم الأزرار لاختيار نوع السؤال، ثم اكتب نص السؤال.',
+        { reply_markup: mainMenuKeyboard() }
+      );
+      return true;
+    }
+    case 'q_text': {
+      const { handleQuestionText } = await import('./commands/requirements');
+      await handleQuestionText(token, chatId, db, text);
+      return true;
+    }
+    case 'q_options': {
+      const { handleQuestionOptions } = await import('./commands/requirements');
+      await handleQuestionOptions(token, chatId, db, text);
+      return true;
+    }
+
     default:
       return false;
   }

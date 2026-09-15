@@ -49,7 +49,9 @@ import {
 } from './commands/cancel-reg';
 import { handleCloseMission } from './commands/close';
 import { handleReopenMission } from './commands/reopen';
+import { handleRequirementsList, handleQuestionsList, handleReqCallback, handleQuestionCallback } from './commands/requirements';
 import { getMissionById, getMissionByPublicCode } from '../services/mission.service';
+import { getMissionRequirements, getMissionQuestions } from '../services/mission.requirements.service';
 
 // ─── Field labels for edit prompts ───────────────────────────────
 const EDIT_FIELD_LABELS: Record<string, string> = {
@@ -132,6 +134,12 @@ export async function handleCallbackQuery(
         break;
       case 'act':
         await handleActivity(token, chatId, db, parts, adminChatIds);
+        break;
+      case 'req':
+        await handleReqCallback(token, chatId, db, parts[0], parts);
+        break;
+      case 'q':
+        await handleQuestionCallback(token, chatId, db, parts[0], parts);
         break;
       default:
         console.warn('Unknown callback prefix:', prefix);
@@ -336,6 +344,17 @@ async function handleMission(
     case 'notify_toggle':
       if (!await requireAdmin(token, chatId, db, adminChatIds)) return;
       if (missionId) await handleMissionNotificationToggle(token, chatId, db, missionId);
+      break;
+
+    case 'reqs':
+      if (!await requireAdmin(token, chatId, db, adminChatIds)) return;
+      // action = 'reqs', missionId = parts[1]
+      if (missionId) await handleRequirementsList(token, chatId, db, missionId);
+      break;
+
+    case 'questions':
+      if (!await requireAdmin(token, chatId, db, adminChatIds)) return;
+      if (missionId) await handleQuestionsList(token, chatId, db, missionId);
       break;
   }
 }

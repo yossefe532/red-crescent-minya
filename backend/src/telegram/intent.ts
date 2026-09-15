@@ -180,9 +180,9 @@ function fixYear(dateStr: string): string | null {
 async function parseWithAI(text: string, ai?: any): Promise<ParsedIntent | null> {
   if (!ai) return null;
 
-  // Get current date/time in Cairo for the AI prompt
+  // Get current date/time in Cairo for the AI prompt (canonical timezone, no hardcoded offset)
   const now = new Date();
-  const cairoNow = new Date(now.getTime() + (3 * 60 * 60 * 1000)); // Approx Cairo UTC+3
+  const cairoNow = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
   const todayStr = cairoNow.toISOString().split('T')[0]; // "YYYY-MM-DD"
   const dayOfWeek = cairoNow.toLocaleDateString('ar-EG', { weekday: 'long', timeZone: 'Africa/Cairo' });
 

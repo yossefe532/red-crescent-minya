@@ -11,6 +11,8 @@ import {
   formatEnhancedStats,
   formatHealth,
   buildWhatsAppMessage,
+  formatRequirementsSummary,
+  formatQuestionsSummary,
 } from '../formatters';
 import {
   mainMenuKeyboard,
@@ -26,6 +28,8 @@ import {
   listMissions,
   getMissionByPublicCode,
 } from '../../services/mission.service';
+import { APP_TIMEZONE } from '../../config/timezone';
+import { getMissionRequirements, getMissionQuestions } from '../../services/mission.requirements.service';
 
 // Re-export for external modules
 export { getMissionAvailability, formatMissionDetail };
@@ -222,8 +226,20 @@ export async function handleMissionDetail(
 
     const status = mission.status ?? 'DRAFT';
     const availability = await getMissionAvailability(db, mission.id);
+    const baseMsg = formatMissionDetail(mission, availability);
 
-    await tgSend(token, chatId, formatMissionDetail(mission, availability), {
+    // Append requirements & questions summary if they exist
+    let extra = '';
+    try {
+      const reqs = await getMissionRequirements(db, mission.id);
+      extra += formatRequirementsSummary(reqs);
+    } catch { /* no requirements */ }
+    try {
+      const qs = await getMissionQuestions(db, mission.id);
+      extra += formatQuestionsSummary(qs);
+    } catch { /* no questions */ }
+
+    await tgSend(token, chatId, baseMsg + extra, {
       reply_markup: missionDetailKeyboard(mission.id, status),
     });
   } catch (err: any) {
@@ -363,7 +379,8 @@ export async function handleExportCSV(
             : r.status === 'CANCELLED'
             ? 'ملغي'
             : 'قيد المراجعة';
-        return `${idx + 1},"${r.member_id}","${r.volunteer_name}","${r.phone || ''}","${statusAr}","${r.seat_number || '-'}","${r.waitlist_position || '-'}","${new Date(r.created_at).toLocaleString('ar-EG')}"`;
+        return `${idx + 1},"${r.member_id}","${r.volunteer_name}","${r.phone || ''}","${statusAr}","${r.seat_number || '-'}","${r.waitlist_position || '-'}","${new Date(r.created_at.endsWith('Z') || r.created_at.includes('+') ? r.created_at : r.created_at + 'Z').toLocaleString('ar-EG', { timeZone: APP_TIMEZONE })}"`;
+
       })
       .join('\n');
 

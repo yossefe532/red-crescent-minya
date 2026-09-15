@@ -38,6 +38,7 @@ import LoadingState from '@/components/ui/LoadingState';
 import Skeleton from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
+import { formatEgyptTime } from '@/lib/timezone';
 import MissionControlPanel from './MissionControlPanel';
 import {
   checkSession,
@@ -51,8 +52,9 @@ import {
   moveRegistrationStatus,
   fetchAudioPlaybackUrl,
   getExportCsvUrl,
+  getRegistrationAnswers,
 } from '@/api/admin';
-import type { Mission, Registration, MissionCreateResponse, AdminUser } from '@/api/admin';
+import type { Mission, Registration, MissionCreateResponse, AdminUser, RegistrationAnswer } from '@/api/admin';
 
 interface Props {}
 
@@ -101,6 +103,29 @@ export function AdminDashboard(_props: Props) {
   const [confirmRestore, setConfirmRestore] = useState<Registration | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [movingStatus, setMovingStatus] = useState<string | null>(null); // registrationId being moved
+
+  // ── Step 12: Registration answers display ──
+  const [expandedRegId, setExpandedRegId] = useState<string | null>(null);
+  const [regAnswers, setRegAnswers] = useState<RegistrationAnswer[]>([]);
+  const [loadingAnswers, setLoadingAnswers] = useState(false);
+
+  const handleToggleAnswers = async (regId: string) => {
+    if (expandedRegId === regId) {
+      setExpandedRegId(null);
+      setRegAnswers([]);
+      return;
+    }
+    setExpandedRegId(regId);
+    setLoadingAnswers(true);
+    try {
+      const answers = await getRegistrationAnswers(regId);
+      setRegAnswers(answers);
+    } catch {
+      setRegAnswers([]);
+    } finally {
+      setLoadingAnswers(false);
+    }
+  };
 
   // === ALL ORIGINAL HANDLERS — UNTOUCHED ===
   const handlePlayAudio = async (registrationId: string) => {
@@ -524,7 +549,7 @@ export function AdminDashboard(_props: Props) {
                       {m.start_at && (
                         <span className="flex items-center gap-1">
                           <Clock3 className="h-3.5 w-3.5" />
-                          {new Date(m.start_at).toLocaleDateString('ar-EG')}
+                          {new Date(m.start_at + (m.start_at.endsWith('Z') || m.start_at.includes('+') ? '' : 'Z')).toLocaleDateString('ar-EG', { timeZone: 'Africa/Cairo' })}
                         </span>
                       )}
                     </div>
@@ -675,7 +700,8 @@ export function AdminDashboard(_props: Props) {
                         {registrations.map((reg) => {
                           const isCancelled = reg.status === 'CANCELLED';
                           return (
-                            <tr key={reg.id} className="hover:bg-slate-50/80 transition">
+                            <React.Fragment key={reg.id}>
+                            <tr className="hover:bg-slate-50/80 transition">
                               <td className="py-3.5 px-4 font-mono font-bold text-slate-400">
                                 {reg.registration_sequence}
                               </td>
@@ -739,11 +765,7 @@ export function AdminDashboard(_props: Props) {
                                 )}
                               </td>
                               <td className="py-3.5 px-4 text-slate-500 text-[11px]">
-                                {new Date(reg.created_at).toLocaleTimeString('ar-EG', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  second: '2-digit',
-                                })}
+                                {formatEgyptTime(reg.created_at)}
                               </td>
                               <td className="py-3.5 px-4 text-center">
                                 <div className="flex items-center justify-center gap-1.5 flex-wrap">
@@ -801,9 +823,44 @@ export function AdminDashboard(_props: Props) {
                                       استعادة
                                     </Button>
                                   )}
+                                  {/* Step 12: View answers button */}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleToggleAnswers(reg.id)}
+                                    className={cn(
+                                      'text-[11px]',
+                                      expandedRegId === reg.id ? 'text-brand-700 bg-brand-50' : 'text-slate-600 hover:text-brand-700 hover:bg-brand-50'
+                                    )}
+                                  >
+                                    {expandedRegId === reg.id ? 'إخفاء' : '📋 إجابات'}
+                                  </Button>
                                 </div>
                               </td>
                             </tr>
+                            {/* Step 12: Expandable answers row */}
+                            {expandedRegId === reg.id && (
+                              <tr>
+                                <td colSpan={7} className="bg-slate-50 px-4 py-3 border-t border-slate-100">
+                                  {loadingAnswers ? (
+                                    <p className="text-xs text-slate-400 animate-pulse">جاري تحميل الإجابات...</p>
+                                  ) : regAnswers.length > 0 ? (
+                                    <div className="space-y-1.5">
+                                      <p className="text-[11px] font-bold text-slate-600 mb-2">📋 إجابات الأسئلة:</p>
+                                      {regAnswers.map((ans) => (
+                                        <div key={ans.id} className="flex items-start gap-2 text-xs">
+                                          <span className="text-slate-400 font-mono shrink-0">{ans.question_id.slice(0, 8)}</span>
+                                          <span className="text-slate-700">{ans.answer_text}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-400">لا توجد إجابات مسجلة</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                            </React.Fragment>
                           );
                         })}
                       </tbody>
@@ -831,7 +888,7 @@ export function AdminDashboard(_props: Props) {
                             </div>
                             <div className="flex items-center gap-3 text-xs text-slate-500">
                               <span className="font-mono">{reg.member_id}</span>
-                              <span>{new Date(reg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
+                              <span>{formatEgyptTime(reg.created_at)}</span>
                             </div>
                             <div className="flex items-center gap-2 pt-1 flex-wrap">
                               {(reg.has_audio_data === 1 || reg.has_audio_data === true) && (
@@ -899,7 +956,39 @@ export function AdminDashboard(_props: Props) {
                                   استعادة
                                 </Button>
                               )}
+                              {/* Step 12: View answers button (mobile) */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleToggleAnswers(reg.id)}
+                                className={cn(
+                                  'text-xs',
+                                  expandedRegId === reg.id ? 'text-brand-700 bg-brand-50' : 'text-slate-600 hover:text-brand-700 hover:bg-brand-50'
+                                )}
+                              >
+                                {expandedRegId === reg.id ? 'إخفاء' : '📋 إجابات'}
+                              </Button>
                             </div>
+                            {/* Step 12: Expandable answers section (mobile) */}
+                            {expandedRegId === reg.id && (
+                              <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 mt-2">
+                                {loadingAnswers ? (
+                                  <p className="text-xs text-slate-400 animate-pulse">جاري تحميل الإجابات...</p>
+                                ) : regAnswers.length > 0 ? (
+                                  <div className="space-y-1.5">
+                                    <p className="text-[11px] font-bold text-slate-600 mb-2">📋 إجابات الأسئلة:</p>
+                                    {regAnswers.map((ans) => (
+                                      <div key={ans.id} className="flex items-start gap-2 text-xs">
+                                        <span className="text-slate-400 font-mono shrink-0">{ans.question_id.slice(0, 8)}</span>
+                                        <span className="text-slate-700">{ans.answer_text}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-[11px] text-slate-400">لا توجد إجابات مسجلة</p>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}

@@ -99,6 +99,11 @@ export function missionDetailKeyboard(missionId: string, status: string): Inline
     .text('📥 تصدير CSV', `m:export:${missionId}`)
     .row();
 
+  // Requirements & Questions management
+  kb.text('📋 المتطلبات', `m:reqs:${missionId}`)
+    .text('❓ الأسئلة', `m:questions:${missionId}`)
+    .row();
+
   kb.text('🗑️ حذف المهمة', `m:delete:${missionId}`)
     .text('🔔 الإشعارات', `m:notify_toggle:${missionId}`)
     .row();
@@ -316,4 +321,74 @@ export function missionNotificationToggleKeyboard(missionId: string, isOn: boole
     .text('📄 تفاصيل المهمة', `m:detail:${missionId}`)
     .text('🏠 الرئيسية', 'nav:home');
   return kb;
+}
+
+// ─── Requirement Management ─────────────────────────────────
+export function requirementListKeyboard(
+  missionId: string,
+  requirements: Array<{ id: string; text: string; type: string; requires_acceptance: number }>
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const req of requirements) {
+    const icon = req.requires_acceptance ? '☑️' : '📄';
+    kb.text(`${icon} ${escapeHtml(req.text)}`, `req:detail:${req.id}`).row();
+  }
+  kb.text('➕ إضافة متطلب جديد', `req:add:${missionId}`).row();
+  kb.text('📄 تفاصيل المهمة', `m:detail:${missionId}`);
+  return kb;
+}
+
+export function requirementDetailKeyboard(requirementId: string, missionId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✏️ تعديل النص', `req:edit:${requirementId}`)
+    .row()
+    .text('🗑️ حذف', `req:delete:${requirementId}`)
+    .row()
+    .text('📋 قائمة المتطلبات', `m:reqs:${missionId}`)
+    .text('📄 تفاصيل المهمة', `m:detail:${missionId}`);
+}
+
+export function requirementTypeKeyboard(missionId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('☑️ موافقة (_stub)', `req:set_type:${missionId}:STUB`)
+    .row()
+    .text('❌ إلغاء', `m:reqs:${missionId}`);
+}
+
+// ─── Question Management ────────────────────────────────────
+export function questionListKeyboard(
+  missionId: string,
+  questions: Array<{ id: string; question_text: string; question_type: string }>
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const q of questions) {
+    const icon = q.question_type === 'TEXT' ? '📝' : q.question_type === 'SINGLE_CHOICE' ? '🔘' : q.question_type === 'MULTI_CHOICE' ? '☑️' : '🔢';
+    kb.text(`${icon} ${escapeHtml(q.question_text)}`, `q:detail:${q.id}`).row();
+  }
+  kb.text('➕ إضافة سؤال جديد', `q:add:${missionId}`).row();
+  kb.text('📄 تفاصيل المهمة', `m:detail:${missionId}`);
+  return kb;
+}
+
+export function questionDetailKeyboard(questionId: string, missionId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✏️ تعديل النص', `q:edit:${questionId}`)
+    .row()
+    .text('🗑️ حذف', `q:delete:${questionId}`)
+    .row()
+    .text('❓ قائمة الأسئلة', `m:questions:${missionId}`)
+    .text('📄 تفاصيل المهمة', `m:detail:${missionId}`);
+}
+
+export function questionTypeKeyboard(missionId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📝 نص حر (TEXT)', `q:set_type:${missionId}:TEXT`)
+    .row()
+    .text('🔘 اختيار واحد (SINGLE_CHOICE)', `q:set_type:${missionId}:SINGLE_CHOICE`)
+    .row()
+    .text('☑️ اختيار متعدد (MULTI_CHOICE)', `q:set_type:${missionId}:MULTI_CHOICE`)
+    .row()
+    .text('🔢 رقمي (NUMBER)', `q:set_type:${missionId}:NUMBER`)
+    .row()
+    .text('❌ إلغاء', `m:questions:${missionId}`);
 }

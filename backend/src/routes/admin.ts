@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { Env, AppEnv } from '../env';
 import { success, Errors } from '../utils/response';
+import { APP_TIMEZONE } from '../config/timezone';
 import { adminAuth, getAdminId, createSession } from '../middleware/auth';
 import { authenticateAdmin } from '../services/admin.service';
 import {
@@ -14,6 +15,18 @@ import {
 import { logAudit } from '../services/audit.service';
 import { createMissionSchema, updateMissionSchema } from '../validation/admin.schema';
 import { incrementMissionVersion } from '../utils/version';
+import {
+  getAllMissionRequirements,
+  createRequirement,
+  updateRequirement,
+  deleteRequirement,
+  getAllMissionQuestions,
+  createQuestion,
+  updateQuestion,
+  deleteQuestion,
+  getRegistrationAnswers,
+  getQuestionWithAnswers,
+} from '../services/mission.requirements.service';
 
 const adminRoutes = new Hono<AppEnv>();
 
@@ -686,7 +699,7 @@ adminRoutes.get('/missions/:id/export', adminAuth, async (c) => {
             : 'قيد المراجعة';
         const seatDisplay = r.seat_number || '-';
         const waitlistDisplay = r.waitlist_position || '-';
-        const date = new Date(r.created_at).toLocaleString('ar-EG');
+        const date = new Date(r.created_at.endsWith('Z') || r.created_at.includes('+') ? r.created_at : r.created_at + 'Z').toLocaleString('ar-EG', { timeZone: APP_TIMEZONE });
         return `${idx + 1},"${r.member_id}","${r.volunteer_name}","${r.phone}","${statusAr}","${seatDisplay}","${waitlistDisplay}","${date}"`;
       })
       .join('\n');
@@ -826,6 +839,245 @@ adminRoutes.post('/registrations/:regId/restore', adminAuth, async (c) => {
       return Errors.conflict(c, 'لا يمكن استرجاع تسجيل غير ملغي');
     }
     console.error('Restore registration error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// ─── Mission Requirements CRUD (Admin) ────────────────
+
+// GET /api/admin/missions/:id/requirements - List all requirements for a mission
+adminRoutes.get('/missions/:id/requirements', adminAuth, async (c) => {
+  try {
+    const missionId = c.req.param('id') as string;
+    const mission = await getMissionById(c.env.DB, missionId);
+    if (!mission) return Errors.notFound(c, 'Mission');
+
+    const requirements = await getAllMissionRequirements(c.env.DB, missionId);
+    return success(c, { requirements });
+  } catch (err: any) {
+    console.error('List requirements error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// POST /api/admin/missions/:id/requirements - Create a requirement
+adminRoutes.post('/missions/:id/requirements', adminAuth, async (c) => {
+  try {
+    const missionId = c.req.param('id') as string;
+    const mission = await getMissionById(c.env.DB, missionId);
+    if (!mission) return Errors.notFound(c, 'Mission');
+
+    const body = await c.req.json();
+    const { type, text, requires_acceptance, auto_verify, sort_order } = body;
+
+    if (!type || !text) {
+      return Errors.validation(c, [
+        { path: 'type', message: 'نوع المتطلب مطلوب' },
+        { path: 'text', message: 'نص المتطلب مطلوب' },
+      ]);
+    }
+
+    const adminId = getAdminId(c);
+    const requirement = await createRequirement(
+      c.env.DB, missionId, type, text,
+      requires_acceptance ?? 0, auto_verify ?? 0, sort_order ?? 0
+    );
+
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'REQUIREMENT_CREATED',
+      entityType: 'requirement',
+      entityId: requirement.id,
+      metadata: { mission_id: missionId, type, text },
+    });
+
+    return success(c, requirement);
+  } catch (err: any) {
+    console.error('Create requirement error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// PATCH /api/admin/missions/:missionId/requirements/:reqId - Update a requirement
+adminRoutes.patch('/missions/:missionId/requirements/:reqId', adminAuth, async (c) => {
+  try {
+    const reqId = c.req.param('reqId') as string;
+    const body = await c.req.json();
+    const adminId = getAdminId(c);
+
+    const requirement = await updateRequirement(c.env.DB, reqId, body);
+    if (!requirement) return Errors.notFound(c, 'Requirement');
+
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'REQUIREMENT_UPDATED',
+      entityType: 'requirement',
+      entityId: reqId,
+      metadata: body,
+    });
+
+    return success(c, requirement);
+  } catch (err: any) {
+    console.error('Update requirement error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// DELETE /api/admin/missions/:missionId/requirements/:reqId - Soft-delete a requirement
+adminRoutes.delete('/missions/:missionId/requirements/:reqId', adminAuth, async (c) => {
+  try {
+    const reqId = c.req.param('reqId') as string;
+    const adminId = getAdminId(c);
+
+    await deleteRequirement(c.env.DB, reqId);
+
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'REQUIREMENT_DELETED',
+      entityType: 'requirement',
+      entityId: reqId,
+    });
+
+    return success(c, { message: 'تم حذف المتطلب بنجاح' });
+  } catch (err: any) {
+    console.error('Delete requirement error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// ─── Mission Questions CRUD (Admin) ──────────────────
+
+// GET /api/admin/missions/:id/questions - List all questions for a mission
+adminRoutes.get('/missions/:id/questions', adminAuth, async (c) => {
+  try {
+    const missionId = c.req.param('id') as string;
+    const mission = await getMissionById(c.env.DB, missionId);
+    if (!mission) return Errors.notFound(c, 'Mission');
+
+    const questions = await getAllMissionQuestions(c.env.DB, missionId);
+    return success(c, { questions });
+  } catch (err: any) {
+    console.error('List questions error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// POST /api/admin/missions/:id/questions - Create a question
+adminRoutes.post('/missions/:id/questions', adminAuth, async (c) => {
+  try {
+    const missionId = c.req.param('id') as string;
+    const mission = await getMissionById(c.env.DB, missionId);
+    if (!mission) return Errors.notFound(c, 'Mission');
+
+    const body = await c.req.json();
+    const { question_text, question_type, required, options, sort_order } = body;
+
+    if (!question_text || !question_type) {
+      return Errors.validation(c, [
+        { path: 'question_text', message: 'نص السؤال مطلوب' },
+        { path: 'question_type', message: 'نوع السؤال مطلوب' },
+      ]);
+    }
+
+    const adminId = getAdminId(c);
+    const question = await createQuestion(
+      c.env.DB, missionId, question_text, question_type,
+      required ?? 1, options ?? '[]', sort_order ?? 0
+    );
+
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'QUESTION_CREATED',
+      entityType: 'question',
+      entityId: question.id,
+      metadata: { mission_id: missionId, question_text, question_type },
+    });
+
+    return success(c, question);
+  } catch (err: any) {
+    console.error('Create question error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// PATCH /api/admin/missions/:missionId/questions/:questionId - Update a question
+adminRoutes.patch('/missions/:missionId/questions/:questionId', adminAuth, async (c) => {
+  try {
+    const questionId = c.req.param('questionId') as string;
+    const body = await c.req.json();
+    const adminId = getAdminId(c);
+
+    const question = await updateQuestion(c.env.DB, questionId, body);
+    if (!question) return Errors.notFound(c, 'Question');
+
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'QUESTION_UPDATED',
+      entityType: 'question',
+      entityId: questionId,
+      metadata: body,
+    });
+
+    return success(c, question);
+  } catch (err: any) {
+    console.error('Update question error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// DELETE /api/admin/missions/:missionId/questions/:questionId - Soft-delete a question
+adminRoutes.delete('/missions/:missionId/questions/:questionId', adminAuth, async (c) => {
+  try {
+    const questionId = c.req.param('questionId') as string;
+    const adminId = getAdminId(c);
+
+    await deleteQuestion(c.env.DB, questionId);
+
+    await logAudit(c.env.DB, {
+      actorId: adminId,
+      actorType: 'admin',
+      action: 'QUESTION_DELETED',
+      entityType: 'question',
+      entityId: questionId,
+    });
+
+    return success(c, { message: 'تم حذف السؤال بنجاح' });
+  } catch (err: any) {
+    console.error('Delete question error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// ─── Registration Answers (Admin) ────────────────────
+
+// GET /api/admin/registrations/:regId/answers - Get answers for a registration
+adminRoutes.get('/registrations/:regId/answers', adminAuth, async (c) => {
+  try {
+    const regId = c.req.param('regId') as string;
+    const answers = await getRegistrationAnswers(c.env.DB, regId);
+    return success(c, { answers });
+  } catch (err: any) {
+    console.error('Get registration answers error:', err);
+    return Errors.internal(c);
+  }
+});
+
+// GET /api/admin/missions/:id/question-answers - Get all answers grouped by question
+adminRoutes.get('/missions/:id/question-answers', adminAuth, async (c) => {
+  try {
+    const missionId = c.req.param('id') as string;
+    const mission = await getMissionById(c.env.DB, missionId);
+    if (!mission) return Errors.notFound(c, 'Mission');
+
+    const questionsWithAnswers = await getQuestionWithAnswers(c.env.DB, missionId);
+    return success(c, { questions: questionsWithAnswers });
+  } catch (err: any) {
+    console.error('Get question answers error:', err);
     return Errors.internal(c);
   }
 });

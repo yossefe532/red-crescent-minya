@@ -67,6 +67,29 @@ export function formatMissionDetail(
     + `🔗 <b>رابط التسجيل:</b>\n<code>${regLink}</code>`;
 }
 
+// ─── Mission Requirements & Questions Summary ──────────────────
+export function formatRequirementsSummary(requirements: any[]): string {
+  if (!requirements || requirements.length === 0) return '';
+  let out = `\n\n⚠️ <b>شروط المهمة:</b>\n`;
+  requirements.forEach((r, idx) => {
+    out += `   ${idx + 1}. ${escapeHtml(r.text)}`;
+    out += r.requires_acceptance ? ' ☑️' : '';
+    out += `\n`;
+  });
+  return out;
+}
+
+export function formatQuestionsSummary(questions: any[]): string {
+  if (!questions || questions.length === 0) return '';
+  let out = `\n❓ <b>أسئلة التسجيل:</b>\n`;
+  questions.forEach((q, idx) => {
+    out += `   ${idx + 1}. ${escapeHtml(q.question_text)}`;
+    out += q.required ? ' (إلزامي)' : ' (اختياري)';
+    out += `\n`;
+  });
+  return out;
+}
+
 // ─── Mission List Item ─────────────────────────────────────────
 export function formatMissionListItem(
   mission: any,
@@ -86,10 +109,11 @@ export function formatMissionListItem(
 export function formatVolunteerDetail(
   reg: any,
   hasAudio: boolean,
-  audioDurationSec: number
+  audioDurationSec: number,
+  answers?: Array<{ question_id: string; answer_text: string }>
 ): string {
   const volunteerName = reg.name || reg.volunteer_name || 'غير معروف';
-  return `👤 <b>تفاصيل المتطوع</b>\n`
+  let text = `👤 <b>تفاصيل المتطوع</b>\n`
     + `━━━━━━━━━━━━━━━━━\n\n`
     + `📝 <b>الاسم:</b> ${escapeHtml(volunteerName)}\n`
     + `🏷️ <b>رقم العضوية:</b> ${reg.member_id}\n`
@@ -103,6 +127,16 @@ export function formatVolunteerDetail(
     + (hasAudio
       ? `🎙️ <b>يوجد تسجيل صوتي</b>${audioDurationSec ? ` (${audioDurationSec} ث)` : ''}`
       : `🔇 <b>لا يوجد تسجيل صوتي</b>`);
+
+  // Step 18: Show question answers if available
+  if (answers && answers.length > 0) {
+    text += `\n\n📋 <b>إجابات الأسئلة:</b>\n`;
+    for (const ans of answers) {
+      text += `• ${escapeHtml(ans.answer_text)}\n`;
+    }
+  }
+
+  return text;
 }
 
 // ─── Registration Notification ─────────────────────────────────
@@ -219,31 +253,20 @@ export function formatSearchResults(
   total: number
 ): string {
   if (results.length === 0) {
-    return `🔍 <b>نتائج البحث</b>
-`
-      + `━━━━━━━━━━━━━━━━━
-
-`
+    return `🔍 <b>نتائج البحث</b>\n`
+      + `━━━━━━━━━━━━━━━━━\n\n`
       + `❌ لا توجد نتائج للبحث: <b>${escapeHtml(query)}</b>`;
   }
-  let msg = `🔍 <b>نتائج البحث:</b> "${escapeHtml(query)}"
-`
-    + `━━━━━━━━━━━━━━━━━
-
-`
-    + `📊 وجدت <b>${total}</b> نتيجة:
-
-`;
+  let msg = `🔍 <b>نتائج البحث:</b> "${escapeHtml(query)}"\n`
+    + `━━━━━━━━━━━━━━━━━\n\n`
+    + `📊 وجدت <b>${total}</b> نتيجة:\n\n`;
   results.forEach((r, idx) => {
     const statusIcon = r.status === 'CONFIRMED' ? '✅' : r.status === 'WAITLIST' ? '⏳' : '❌';
-    msg += `${idx + 1}. ${statusIcon} <b>${escapeHtml(r.name)}</b> (${r.member_id})
-`;
+    msg += `${idx + 1}. ${statusIcon} <b>${escapeHtml(r.name)}</b> (${r.member_id})\n`;
     msg += `   📋 ${r.mission_code} — ${regStatusLabel(r.status)}`;
     if (r.seat_number) msg += ` 💺#${r.seat_number}`;
     if (r.waitlist_position) msg += ` ⏳#${r.waitlist_position}`;
-    msg += `
-
-`;
+    msg += `\n\n`;
   });
   return msg;
 }
@@ -256,20 +279,13 @@ export function formatAllVolunteers(
   perPage: number
 ): string {
   const totalPages = Math.ceil(total / perPage);
-  let msg = `👥 <b>جميع المتطوعين</b>
-`
-    + `━━━━━━━━━━━━━━━━━
-
-`
-    + `📊 الإجمالي: <b>${total}</b> | الصفحة ${page}/${totalPages}
-
-`;
+  let msg = `👥 <b>جميع المتطوعين</b>\n`
+    + `━━━━━━━━━━━━━━━━━\n\n`
+    + `📊 الإجمالي: <b>${total}</b> | الصفحة ${page}/${totalPages}\n`;
   volunteers.forEach((v, idx) => {
     const statusIcon = v.status === 'CONFIRMED' ? '✅' : v.status === 'WAITLIST' ? '⏳' : '❌';
-    msg += `${(page - 1) * perPage + idx + 1}. ${statusIcon} <b>${escapeHtml(v.name)}</b> (${v.member_id})
-`;
-    msg += `   📋 ${v.mission_code} — ${formatDateShort(v.created_at)}
-`;
+    msg += `${(page - 1) * perPage + idx + 1}. ${statusIcon} <b>${escapeHtml(v.name)}</b> (${v.member_id})\n`;
+    msg += `   📋 ${v.mission_code} — ${formatDateShort(v.created_at)}\n`;
   });
   return msg;
 }
@@ -286,39 +302,22 @@ export function formatEnhancedStats(stats: {
   todayRegistrations: number;
   mostActiveMissions: Array<{ title: string; public_code: string; count: number }>;
 }): string {
-  let msg = `📊 <b>إحصائيات النظام</b>
-`
-    + `━━━━━━━━━━━━━━━━━
-
-`
-    + `📋 <b>المهمات:</b>
-`
-    + `   الإجمالي: ${stats.totalMissions}
-`
-    + `   🟢 مفتوحة: ${stats.openMissions}
-`
-    + `   🔴 مغلقة: ${stats.closedMissions}
-
-`
-    + `📝 <b>التسجيلات:</b>
-`
-    + `   الإجمالي: ${stats.totalRegistrations}
-`
-    + `   ✅ مؤكدة: ${stats.confirmed}
-`
-    + `   ⏳ انتظار: ${stats.waitlist}
-`
-    + `   ❌ ملغاة: ${stats.cancelled}
-`
-    + `   📅 تسجيلات اليوم: ${stats.todayRegistrations}
-`;
+  let msg = `📊 <b>إحصائيات النظام</b>\n`
+    + `━━━━━━━━━━━━━━━━━\n\n`
+    + `📋 <b>المهمات:</b>\n`
+    + `   الإجمالي: ${stats.totalMissions}\n`
+    + `   🟢 مفتوحة: ${stats.openMissions}\n`
+    + `   🔴 مغلقة: ${stats.closedMissions}\n\n`
+    + `📝 <b>التسجيلات:</b>\n`
+    + `   الإجمالي: ${stats.totalRegistrations}\n`
+    + `   ✅ مؤكدة: ${stats.confirmed}\n`
+    + `   ⏳ انتظار: ${stats.waitlist}\n`
+    + `   ❌ ملغاة: ${stats.cancelled}\n`
+    + `   📅 تسجيلات اليوم: ${stats.todayRegistrations}\n`;
   if (stats.mostActiveMissions.length > 0) {
-    msg += `
-🏆 <b>المهمات الأكثر نشاطاً:</b>
-`;
+    msg += `\n🏆 <b>المهمات الأكثر نشاطاً:</b>\n`;
     stats.mostActiveMissions.forEach((m, idx) => {
-      msg += `   ${idx + 1}. ${escapeHtml(m.title)} (${m.public_code}) — ${m.count} مسجل
-`;
+      msg += `   ${idx + 1}. ${escapeHtml(m.title)} (${m.public_code}) — ${m.count} مسجل\n`;
     });
   }
   return msg;
